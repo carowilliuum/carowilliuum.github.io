@@ -18,7 +18,7 @@ export default function CrosswordHeader() {
 					<a href="/" className="crossword-site-header__logo" aria-label="Games home">
 						<CrosswordMonogram />
 						<span className="crossword-site-header__logo-divider" aria-hidden="true" />
-						<span className="crossword-site-header__logo-text">Collab</span>
+						<span className="crossword-site-header__logo-text">collab</span>
 					</a>
 				</div>
 			</header>
