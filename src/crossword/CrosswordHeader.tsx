@@ -1,3 +1,6 @@
+import CrosswordMonogram from "./CrosswordMonogram";
+import { crosswordMeta } from "./data";
+
 import type { NYTPuzzle } from "./nyt";
 
 type CrosswordHeaderProps = {
@@ -43,11 +46,13 @@ export default function CrosswordHeader({ puzzle }: CrosswordHeaderProps) {
 						className="crossword-site-header__logo"
 						aria-label="Games home"
 					>
-						<span className="crossword-site-header__logo-mark">
-							T
-						</span>
+						<CrosswordMonogram />
+						<span
+							className="crossword-site-header__logo-divider"
+							aria-hidden="true"
+						/>
 						<span className="crossword-site-header__logo-text">
-							Games
+							collab
 						</span>
 					</a>
 				</div>
@@ -57,7 +62,7 @@ export default function CrosswordHeader({ puzzle }: CrosswordHeaderProps) {
 				<div className="crossword-titlebar__details">
 					<div className="crossword-titlebar__heading">
 						<h1>The Crossword</h1>
-						<p>{publicationDate}</p>
+						<h2>{publicationDate}</h2>
 					</div>
 					<div className="crossword-titlebar__byline">
 						{constructors ? <span>By {constructors}</span> : null}
