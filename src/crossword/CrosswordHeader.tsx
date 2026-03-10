@@ -1,3 +1,4 @@
+import CrosswordMonogram from "./CrosswordMonogram";
 import { crosswordMeta } from "./data";
 
 export default function CrosswordHeader() {
@@ -15,8 +16,9 @@ export default function CrosswordHeader() {
 						<span />
 					</button>
 					<a href="/" className="crossword-site-header__logo" aria-label="Games home">
-						<span className="crossword-site-header__logo-mark">T</span>
-						<span className="crossword-site-header__logo-text">Games</span>
+						<CrosswordMonogram />
+						<span className="crossword-site-header__logo-divider" aria-hidden="true" />
+						<span className="crossword-site-header__logo-text">Collab</span>
 					</a>
 				</div>
 			</header>
@@ -25,7 +27,7 @@ export default function CrosswordHeader() {
 				<div className="crossword-titlebar__details">
 					<div className="crossword-titlebar__heading">
 						<h1>{crosswordMeta.title}</h1>
-						<p>{crosswordMeta.date}</p>
+						<h2>{crosswordMeta.date}</h2>
 					</div>
 					<div className="crossword-titlebar__byline">
 						<span>&ldquo;{crosswordMeta.puzzleTitle}&rdquo;</span>

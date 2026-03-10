@@ -1,3 +1,10 @@
+@font-face {
+	font-family: "NYT Karnak Condensed";
+	src: url("./assets/NYTKarnakCondensed.otf") format("opentype");
+	font-weight: 400;
+	font-style: normal;
+}
+
 :root {
 	--crossword-page-bg: #f7f7f5;
 	--crossword-border: #d6d4cf;
@@ -52,14 +59,22 @@ body {
 }
 
 .crossword-site-header__logo-mark {
-	font-family: Georgia, "Times New Roman", serif;
-	font-size: 52px;
-	font-weight: 700;
-	line-height: 1;
+	display: block;
+	width: auto;
+	height: 36px;
+	flex: 0 0 auto;
+}
+
+.crossword-site-header__logo-divider {
+	width: 1px;
+	height: 44px;
+	background: currentColor;
+	opacity: 0.9;
+	flex: 0 0 auto;
 }
 
 .crossword-site-header__logo-text {
-	font-family: Georgia, "Times New Roman", serif;
+	font-family: "NYT Karnak Condensed", Georgia, "Times New Roman", serif;
 	font-size: 56px;
 	font-weight: 700;
 	line-height: 1;
@@ -107,16 +122,25 @@ body {
 
 .crossword-titlebar__heading {
 	display: flex;
-	align-items: baseline;
-	flex-wrap: wrap;
-	gap: 24px;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
 }
 
 .crossword-titlebar__heading h1 {
-	margin: 0;
-	font-family: Georgia, "Times New Roman", serif;
-	font-size: 68px;
+	margin: 0.2em 0;
+	font-family: "NYT Karnak Condensed", Georgia;
+	font-size: 56px;
 	font-weight: 700;
+	line-height: 0.95;
+	letter-spacing: -0.04em;
+}
+
+.crossword-titlebar__heading h2 {
+	margin: 0;
+	font-family: Arial;
+	font-size: 25px;
+	font-weight: 400;
 	line-height: 0.95;
 	letter-spacing: -0.04em;
 }
@@ -132,7 +156,7 @@ body {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 14px;
-	font-size: 25px;
+	font-size: 14px;
 }
 
 .crossword-titlebar__byline span:not(:last-child)::after {
@@ -466,6 +490,10 @@ body {
 
 	.crossword-site-header__logo-mark {
 		font-size: 38px;
+	}
+
+	.crossword-site-header__logo-divider {
+		font-size: 40px;
 	}
 
 	.crossword-site-header__logo-text {
