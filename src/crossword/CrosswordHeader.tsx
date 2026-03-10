@@ -1,6 +1,30 @@
-import { crosswordMeta } from "./data";
+import type { NYTPuzzle } from "./nyt";
 
-export default function CrosswordHeader() {
+type CrosswordHeaderProps = {
+	puzzle: NYTPuzzle | null;
+};
+
+function formatPublicationDate(publicationDate: string) {
+	const parsedDate = new Date(publicationDate);
+
+	if (Number.isNaN(parsedDate.getTime())) {
+		return publicationDate;
+	}
+
+	return new Intl.DateTimeFormat("en-US", {
+		weekday: "long",
+		month: "long",
+		day: "numeric",
+		year: "numeric",
+	}).format(parsedDate);
+}
+
+export default function CrosswordHeader({ puzzle }: CrosswordHeaderProps) {
+	const publicationDate = puzzle
+		? formatPublicationDate(puzzle.publicationDate)
+		: "Loading puzzle…";
+	const constructors = puzzle?.constructors.join(", ");
+
 	return (
 		<>
 			<header className="crossword-site-header">
@@ -14,9 +38,17 @@ export default function CrosswordHeader() {
 						<span />
 						<span />
 					</button>
-					<a href="/" className="crossword-site-header__logo" aria-label="Games home">
-						<span className="crossword-site-header__logo-mark">T</span>
-						<span className="crossword-site-header__logo-text">Games</span>
+					<a
+						href="/"
+						className="crossword-site-header__logo"
+						aria-label="Games home"
+					>
+						<span className="crossword-site-header__logo-mark">
+							T
+						</span>
+						<span className="crossword-site-header__logo-text">
+							Games
+						</span>
 					</a>
 				</div>
 			</header>
@@ -24,17 +56,24 @@ export default function CrosswordHeader() {
 			<section className="crossword-titlebar">
 				<div className="crossword-titlebar__details">
 					<div className="crossword-titlebar__heading">
-						<h1>{crosswordMeta.title}</h1>
-						<p>{crosswordMeta.date}</p>
+						<h1>The Crossword</h1>
+						<p>{publicationDate}</p>
 					</div>
 					<div className="crossword-titlebar__byline">
-						<span>&ldquo;{crosswordMeta.puzzleTitle}&rdquo;</span>
-						<span>By {crosswordMeta.author}</span>
-						<span>Edited by {crosswordMeta.editor}</span>
+						{constructors ? <span>By {constructors}</span> : null}
+						{puzzle?.editor ? (
+							<span>Edited by {puzzle.editor}</span>
+						) : null}
+						{puzzle?.copyright ? (
+							<span>Copyright {puzzle.copyright}</span>
+						) : null}
 					</div>
 				</div>
 				<button type="button" className="crossword-print-button">
-					<span className="crossword-print-button__icon" aria-hidden="true" />
+					<span
+						className="crossword-print-button__icon"
+						aria-hidden="true"
+					/>
 					<span>Print</span>
 				</button>
 			</section>
