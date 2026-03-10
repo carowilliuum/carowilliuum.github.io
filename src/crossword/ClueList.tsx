@@ -3,7 +3,7 @@ import type { CrosswordListItem } from "./nyt";
 type ClueListProps = {
 	title: string;
 	clues: CrosswordListItem[];
-	highlightedClueIds: Set<number>;
+	markedClueIds: Set<number>;
 	selectedClueId: number | null;
 	onSelectClue: (clueId: number) => void;
 };
@@ -11,7 +11,7 @@ type ClueListProps = {
 export default function ClueList({
 	title,
 	clues,
-	highlightedClueIds,
+	markedClueIds,
 	selectedClueId,
 	onSelectClue,
 }: ClueListProps) {
@@ -23,8 +23,8 @@ export default function ClueList({
 					const className = [
 						"crossword-clues__item",
 						selectedClueId === clue.id ? "crossword-clues__item--selected" : "",
-						highlightedClueIds.has(clue.id)
-							? "crossword-clues__item--highlighted"
+						markedClueIds.has(clue.id)
+							? "crossword-clues__item--marked"
 							: "",
 					]
 						.filter(Boolean)

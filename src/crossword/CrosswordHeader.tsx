@@ -64,18 +64,8 @@ export default function CrosswordHeader({ puzzle }: CrosswordHeaderProps) {
 						{puzzle?.editor ? (
 							<span>Edited by {puzzle.editor}</span>
 						) : null}
-						{puzzle?.copyright ? (
-							<span>Copyright {puzzle.copyright}</span>
-						) : null}
 					</div>
 				</div>
-				<button type="button" className="crossword-print-button">
-					<span
-						className="crossword-print-button__icon"
-						aria-hidden="true"
-					/>
-					<span>Print</span>
-				</button>
 			</section>
 		</>
 	);
