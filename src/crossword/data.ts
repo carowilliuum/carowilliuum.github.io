@@ -50,18 +50,23 @@ export const crosswordGrid: CrosswordCell[][] = rows.map((row, rowIndex) =>
 		return {
 			block,
 			letter: block ? "" : value,
-			number: !block ? rowIndex * row.length + columnIndex + 1 : undefined,
+			number: !block
+				? rowIndex * row.length + columnIndex + 1
+				: undefined,
 			selected: rowIndex === 0 && columnIndex === 7,
 			highlighted:
-				rowIndex === 0 &&
-				columnIndex >= 7 &&
-				columnIndex <= 11,
+				rowIndex === 0 && columnIndex >= 7 && columnIndex <= 11,
 		};
-	})
+	}),
 );
 
 export const acrossClues: CrosswordClue[] = [
-	{ number: 12, text: "Some budget-friendly grocery stores", filled: true, selected: true },
+	{
+		number: 12,
+		text: "Some budget-friendly grocery stores",
+		filled: true,
+		selected: true,
+	},
 	{ number: 17, text: "It's on a roll!", filled: true },
 	{ number: 18, text: "Sculpted", filled: true },
 	{ number: 20, text: "Minimalist swimwear", filled: true },
@@ -90,6 +95,10 @@ export const downClues: CrosswordClue[] = [
 	{ number: 26, text: "First (and last) queen of Hawaii", filled: true },
 	{ number: 29, text: "Good thing for a suspect to have", filled: true },
 	{ number: 30, text: "Verboten", filled: true },
-	{ number: 31, text: "Actress who portrayed Hermione Granger", filled: true },
+	{
+		number: 31,
+		text: "Actress who portrayed Hermione Granger",
+		filled: true,
+	},
 	{ number: 33, text: "Tubman of the Underground Railroad", filled: true },
 ];
