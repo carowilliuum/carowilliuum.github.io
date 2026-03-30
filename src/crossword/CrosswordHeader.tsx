@@ -129,8 +129,7 @@ export default function CrosswordHeader({
 									className="crossword-active-user-pill"
 									title={activeUser.username}
 									style={{
-										borderColor: activeUser.color,
-										color: activeUser.color,
+										backgroundColor: activeUser.color,
 									}}
 								>
 									{activeUser.username}

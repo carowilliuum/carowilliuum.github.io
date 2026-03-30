@@ -570,7 +570,7 @@ export default function CrosswordPage() {
 				<section
 					className="crossword-clues"
 					aria-label="Clue lists"
-					style={cluesMaxHeight ? { maxHeight: cluesMaxHeight } : undefined}
+					style={cluesMaxHeight ? { height: cluesMaxHeight } : undefined}
 				>
 					<ClueList
 						title="Across"
