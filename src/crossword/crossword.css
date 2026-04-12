@@ -396,7 +396,7 @@ body {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	gap: 40px;
-	height: 100%;
+	height: var(--crossword-clues-height, calc(100vh - 250px));
 	min-height: 0;
 	overflow: hidden;
 }
@@ -439,6 +439,8 @@ body {
 	padding-right: 6px;
 	list-style: none;
 	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: stable;
 	-webkit-overflow-scrolling: touch;
 }
 
@@ -526,9 +528,21 @@ body {
 		justify-content: space-between;
 	}
 
-	.crossword-layout,
-	.crossword-clues {
+	.crossword-layout {
 		grid-template-columns: 1fr;
+	}
+}
+
+@media (max-width: 720px) {
+	.crossword-clues {
+		height: auto;
+		grid-template-columns: 1fr;
+		overflow: visible;
+	}
+
+	.crossword-clues__section,
+	.crossword-clues__list {
+		overflow: visible;
 	}
 }
 

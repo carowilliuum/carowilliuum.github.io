@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 import AuthScreen from "./AuthScreen";
 import ClueList from "./ClueList";
@@ -171,7 +172,13 @@ export default function CrosswordPage() {
 
 	useEffect(() => {
 		const boardPanel = boardPanelRef.current;
-		if (!boardPanel || typeof ResizeObserver === "undefined") {
+		if (!boardPanel) {
+			return;
+		}
+
+		setCluesMaxHeight(boardPanel.getBoundingClientRect().height);
+
+		if (typeof ResizeObserver === "undefined") {
 			return;
 		}
 
@@ -269,6 +276,11 @@ export default function CrosswordPage() {
 		() => (renderModel ? buildClueItems(renderModel, "Down") : []),
 		[renderModel],
 	);
+	const cluesStyle = cluesMaxHeight
+		? ({
+				"--crossword-clues-height": `${cluesMaxHeight}px`,
+			} as CSSProperties)
+		: undefined;
 
 	const remoteSelections = useMemo(
 		() =>
@@ -570,7 +582,7 @@ export default function CrosswordPage() {
 				<section
 					className="crossword-clues"
 					aria-label="Clue lists"
-					style={cluesMaxHeight ? { height: cluesMaxHeight } : undefined}
+					style={cluesStyle}
 				>
 					<ClueList
 						title="Across"
