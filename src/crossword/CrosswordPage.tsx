@@ -23,6 +23,34 @@ function formatElapsedTime(totalSeconds: number) {
 	).padStart(2, "0")}`;
 }
 
+function CrosswordTimer({
+	resetKey,
+	isLoading,
+}: {
+	resetKey: string;
+	isLoading: boolean;
+}) {
+	const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+	useEffect(() => {
+		setElapsedSeconds(0);
+	}, [resetKey]);
+
+	useEffect(() => {
+		const intervalId = window.setInterval(() => {
+			setElapsedSeconds((currentSeconds) => currentSeconds + 1);
+		}, 1000);
+
+		return () => {
+			window.clearInterval(intervalId);
+		};
+	}, [resetKey]);
+
+	return (
+		<span>{isLoading ? "Loading…" : formatElapsedTime(elapsedSeconds)}</span>
+	);
+}
+
 function getClueText(puzzle: NYTPuzzle["puzzle"], clueId: number) {
 	return (
 		puzzle.clues[clueId]?.text.map((entry) => entry.plain).join(" ") ?? ""
@@ -109,19 +137,8 @@ export default function CrosswordPage() {
 	const [selectedDirection, setSelectedDirection] =
 		useState<Direction>("Across");
 	const [guesses, setGuesses] = useState<Record<number, string>>({});
-	const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
 	const puzzle = data?.puzzle ?? null;
-
-	useEffect(() => {
-		const intervalId = window.setInterval(() => {
-			setElapsedSeconds((currentSeconds) => currentSeconds + 1);
-		}, 1000);
-
-		return () => {
-			window.clearInterval(intervalId);
-		};
-	}, []);
 
 	useEffect(() => {
 		if (!puzzle) {
@@ -137,7 +154,6 @@ export default function CrosswordPage() {
 		);
 		setSelectedDirection("Across");
 		setGuesses({});
-		setElapsedSeconds(0);
 	}, [puzzle]);
 
 	const activeClueId = useMemo(() => {
@@ -323,6 +339,10 @@ export default function CrosswordPage() {
 			currentPosition > 0 ? clueCells[currentPosition - 1] : undefined;
 
 		if (typeof previousCellIndex === "number") {
+			setGuesses((currentGuesses) => ({
+				...currentGuesses,
+				[previousCellIndex]: "",
+			}));
 			setSelectedCellIndex(previousCellIndex);
 		}
 	};
@@ -381,7 +401,7 @@ export default function CrosswordPage() {
 				</div>
 
 				<div className="crossword-toolbar__timer">
-					{isLoading ? "Loading…" : formatElapsedTime(elapsedSeconds)}
+					<CrosswordTimer resetKey={date} isLoading={isLoading} />
 				</div>
 
 				<div className="crossword-toolbar__actions">

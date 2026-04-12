@@ -351,6 +351,11 @@ body {
 	cursor: pointer;
 }
 
+.crossword-grid__cell:focus,
+.crossword-grid__cell:focus-visible {
+	outline: none;
+}
+
 .crossword-grid__cell--block {
 	background: var(--crossword-black);
 	cursor: default;
