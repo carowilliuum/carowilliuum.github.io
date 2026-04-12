@@ -1,36 +1,13 @@
-import CalendarPicker from "./CalendarPicker";
 import CrosswordMonogram from "./CrosswordMonogram";
+import { crosswordMeta } from "./data";
 
-import type {
-	CalendarStatusMap,
-	PuzzleMetadata,
-	UserProfile,
-} from "./firebaseTypes";
-
-type ActiveUser = {
-	uid: string;
-	username: string;
-	color: string;
-};
+import type { NYTPuzzle } from "./nyt";
 
 type CrosswordHeaderProps = {
-	puzzle: PuzzleMetadata | null;
-	currentProfile: UserProfile | null;
-	activeUsers: ActiveUser[];
-	monthViewDate: Date;
-	monthStatuses: CalendarStatusMap;
-	selectedDate: string | null;
-	showOwnership: boolean;
-	onOpenMenu: () => void;
-	onChangeMonth: (nextDate: Date) => void;
-	onSelectDate: (date: string) => void;
+	puzzle: NYTPuzzle | null;
 };
 
-function formatPublicationDate(publicationDate: string | undefined) {
-	if (!publicationDate) {
-		return "Choose a puzzle";
-	}
-
+function formatPublicationDate(publicationDate: string) {
 	const parsedDate = new Date(publicationDate);
 
 	if (Number.isNaN(parsedDate.getTime())) {
@@ -45,18 +22,12 @@ function formatPublicationDate(publicationDate: string | undefined) {
 	}).format(parsedDate);
 }
 
-export default function CrosswordHeader({
-	puzzle,
-	currentProfile,
-	activeUsers,
-	monthViewDate,
-	monthStatuses,
-	selectedDate,
-	showOwnership,
-	onOpenMenu,
-	onChangeMonth,
-	onSelectDate,
-}: CrosswordHeaderProps) {
+export default function CrosswordHeader({ puzzle }: CrosswordHeaderProps) {
+	const publicationDate = puzzle
+		? formatPublicationDate(puzzle.publicationDate)
+		: "Loading puzzle…";
+	const constructors = puzzle?.constructors.join(", ");
+
 	return (
 		<>
 			<header className="crossword-site-header">
@@ -65,7 +36,6 @@ export default function CrosswordHeader({
 						type="button"
 						className="crossword-icon-button crossword-icon-button--menu"
 						aria-label="Open navigation"
-						onClick={onOpenMenu}
 					>
 						<span />
 						<span />
@@ -81,76 +51,25 @@ export default function CrosswordHeader({
 							className="crossword-site-header__logo-divider"
 							aria-hidden="true"
 						/>
-						<span className="crossword-site-header__logo-text">collab</span>
+						<span className="crossword-site-header__logo-text">
+							collab
+						</span>
 					</a>
-				</div>
-				<div className="crossword-site-header__meta">
-					{currentProfile ? (
-						<div className="crossword-site-header__current-user">
-							<span
-								className="crossword-avatar"
-								style={{ backgroundColor: currentProfile.color }}
-							>
-								{currentProfile.initial}
-							</span>
-							<span>{currentProfile.username}</span>
-						</div>
-					) : null}
 				</div>
 			</header>
 
 			<section className="crossword-titlebar">
 				<div className="crossword-titlebar__details">
 					<div className="crossword-titlebar__heading">
-						<h1>{puzzle?.title ?? "The Crossword"}</h1>
-						<h2>{formatPublicationDate(puzzle?.publicationDate)}</h2>
+						<h1>The Crossword</h1>
+						<h2>{publicationDate}</h2>
 					</div>
 					<div className="crossword-titlebar__byline">
-						{puzzle?.constructors?.length ? (
-							<span>By {puzzle.constructors.join(", ")}</span>
+						{constructors ? <span>By {constructors}</span> : null}
+						{puzzle?.editor ? (
+							<span>Edited by {puzzle.editor}</span>
 						) : null}
-						{puzzle?.editor ? <span>Edited by {puzzle.editor}</span> : null}
 					</div>
-				</div>
-				<div className="crossword-titlebar__controls">
-					<CalendarPicker
-						value={selectedDate}
-						monthViewDate={monthViewDate}
-						statuses={monthStatuses}
-						onMonthChange={onChangeMonth}
-						onSelectDate={onSelectDate}
-					/>
-					<div className="crossword-active-bar">
-						<span className="crossword-active-bar__label">Active now:</span>
-						<div className="crossword-active-users">
-							{activeUsers.map((activeUser) => (
-								<span
-									key={activeUser.uid}
-									className="crossword-active-user-pill"
-									title={activeUser.username}
-									style={{
-										backgroundColor: activeUser.color,
-									}}
-								>
-									{activeUser.username}
-								</span>
-							))}
-						</div>
-					</div>
-					{showOwnership ? (
-						<div className="crossword-edits-legend">
-							<span className="crossword-edits-legend__label">Edits</span>
-							{activeUsers.map((activeUser) => (
-								<span
-									key={`legend-${activeUser.uid}`}
-									className="crossword-edits-legend__item"
-									style={{ color: activeUser.color }}
-								>
-									{activeUser.username}
-								</span>
-							))}
-						</div>
-					) : null}
 				</div>
 			</section>
 		</>
