@@ -1,0 +1,19 @@
+{
+	"indexes": [
+		{
+			"collectionGroup": "puzzles",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "publicationDate",
+					"order": "ASCENDING"
+				},
+				{
+					"fieldPath": "lastWorkedAt",
+					"order": "DESCENDING"
+				}
+			]
+		}
+	],
+	"fieldOverrides": []
+}

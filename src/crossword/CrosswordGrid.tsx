@@ -1,15 +1,28 @@
 import { useEffect, useRef } from "react";
 
-import type { NYTPuzzle } from "./nyt";
+import type {
+	PuzzleState,
+	RenderModel,
+	UserProfile,
+} from "./firebaseTypes";
+
+type RemoteSelection = {
+	uid: string;
+	color: string;
+	selectedCellIndex: number | null;
+};
 
 type CrosswordGridProps = {
-	puzzle: NYTPuzzle["puzzle"];
+	puzzle: RenderModel;
 	selectedCellIndex: number | null;
 	primaryHighlightedCellIndexes: Set<number>;
 	secondaryHighlightedCellIndexes: Set<number>;
 	activeClueLabel: string;
 	activeClueText: string;
-	guesses: Record<number, string>;
+	puzzleState: PuzzleState;
+	guessOwners: Record<string, UserProfile | undefined>;
+	remoteSelections: RemoteSelection[];
+	showOwnership: boolean;
 	onSelectCell: (cellIndex: number) => void;
 	onUpdateGuess: (cellIndex: number, value: string) => void;
 	onDeleteGuess: (cellIndex: number) => void;
@@ -23,7 +36,10 @@ export default function CrosswordGrid({
 	secondaryHighlightedCellIndexes,
 	activeClueLabel,
 	activeClueText,
-	guesses,
+	puzzleState,
+	guessOwners,
+	remoteSelections,
+	showOwnership,
 	onSelectCell,
 	onUpdateGuess,
 	onDeleteGuess,
@@ -54,8 +70,28 @@ export default function CrosswordGrid({
 					gridTemplateColumns: `repeat(${puzzle.dimensions.width}, 1fr)`,
 				}}
 			>
-				{puzzle.cells.map((cell, cellIndex) => {
-					const isBlock = !cell.answer;
+				{puzzle.cells.map((cell) => {
+					const cellIndex = cell.index;
+					const isBlock = cell.isBlock;
+					const annotation = puzzleState.cellAnnotations[String(cellIndex)];
+					const guessEntry = puzzleState.guesses[String(cellIndex)];
+					const guessOwner = guessEntry?.guesserId
+						? guessOwners[guessEntry.guesserId]
+						: undefined;
+					const remoteSelectionsForCell = remoteSelections.filter(
+						(entry) => entry.selectedCellIndex === cellIndex,
+					);
+					const remoteSelectionOutline =
+						remoteSelectionsForCell.length > 0
+							? {
+									boxShadow: remoteSelectionsForCell
+										.map(
+											(entry, index) =>
+												`inset 0 0 0 ${index + 2}px ${entry.color}`,
+										)
+										.join(", "),
+							  }
+							: undefined;
 					const className = [
 						"crossword-grid__cell",
 						isBlock ? "crossword-grid__cell--block" : "",
@@ -68,6 +104,13 @@ export default function CrosswordGrid({
 						selectedCellIndex === cellIndex
 							? "crossword-grid__cell--selected"
 							: "",
+						annotation?.status === "correct"
+							? "crossword-grid__cell--correct"
+							: "",
+						annotation?.status === "incorrect"
+							? "crossword-grid__cell--incorrect"
+							: "",
+						annotation?.revealed ? "crossword-grid__cell--revealed" : "",
 					]
 						.filter(Boolean)
 						.join(" ");
@@ -95,9 +138,20 @@ export default function CrosswordGrid({
 							aria-selected={selectedCellIndex === cellIndex}
 							tabIndex={selectedCellIndex === cellIndex ? 0 : -1}
 							onClick={() => onSelectCell(cellIndex)}
+							style={remoteSelectionOutline}
 							onKeyDown={(event) => {
+								const currentValue = guessEntry?.value ?? "";
+								const isRebusCell = (cell.type ?? 1) !== 1;
+
 								if (event.key === "Backspace" || event.key === "Delete") {
 									event.preventDefault();
+									if (isRebusCell && currentValue.length > 1) {
+										onUpdateGuess(
+											cellIndex,
+											currentValue.slice(0, -1),
+										);
+										return;
+									}
 									onDeleteGuess(cellIndex);
 									return;
 								}
@@ -115,15 +169,27 @@ export default function CrosswordGrid({
 
 								if (/^[a-z0-9]$/i.test(event.key)) {
 									event.preventDefault();
-									onUpdateGuess(cellIndex, event.key.toUpperCase());
+									onUpdateGuess(
+										cellIndex,
+										isRebusCell
+											? `${currentValue}${event.key.toUpperCase()}`
+											: event.key.toUpperCase(),
+									);
 								}
 							}}
 						>
 							{cell.label ? (
 								<span className="crossword-grid__number">{cell.label}</span>
 							) : null}
-							<span className="crossword-grid__letter">
-								{guesses[cellIndex] ?? ""}
+							<span
+								className="crossword-grid__letter"
+								style={
+									showOwnership && guessOwner
+										? { color: guessOwner.color }
+										: undefined
+								}
+							>
+								{guessEntry?.value ?? ""}
 							</span>
 						</button>
 					);
