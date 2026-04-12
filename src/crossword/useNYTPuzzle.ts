@@ -42,6 +42,9 @@ export function useNYTPuzzle(date: string): UseNYTPuzzleResult {
 				const response = await fetch(`${apiBase}/${date}.json`, {
 					signal: controller.signal,
 					credentials: "include",
+					headers: {
+						Cookie: "NYT-S=0^CB8SNgiKlPzLBhC_3sDNBhoSMS0JvzQXwLQXj2unySsaQeZDIL7fyFAqAh53OMn6sIcGQgUImeDeBxpAOnk-jWTeWclBFlWTz1db6jDfChvafraeW7YTxk8tb7uLdcU_P3g9opmVpC1yVgKQMBsyS3vsJUaJc3CH6jd0DQ==",
+					},
 				});
 				const contentType = response.headers.get("content-type") ?? "";
 				const responseText = await response.text();

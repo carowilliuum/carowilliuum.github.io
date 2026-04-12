@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+	match /databases/{database}/documents {
+		function isAuthenticated() {
+			return request.auth != null;
+		}
+
+		function isProfileOwner(uid) {
+			return isAuthenticated() && request.auth.uid == uid;
+		}
+
+		match /users/{uid} {
+			allow read: if isAuthenticated();
+			allow create: if isProfileOwner(uid);
+			allow update: if isProfileOwner(uid);
+		}
+
+		match /invites/{email} {
+			allow read, write: if false;
+		}
+
+		match /puzzles/{puzzleId} {
+			allow read: if isAuthenticated();
+			allow update: if isAuthenticated();
+
+			match /content/{documentId} {
+				allow read: if isAuthenticated();
+				allow write: if false;
+			}
+
+			match /private/{documentId} {
+				allow read, write: if false;
+			}
+
+			match /state/{documentId} {
+				allow read, write: if isAuthenticated();
+			}
+
+			match /presence/{documentId} {
+				allow read, write: if isAuthenticated();
+			}
+		}
+	}
+}
