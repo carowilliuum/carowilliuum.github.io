@@ -1,17 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import AuthScreen from "./AuthScreen";
 import ClueList from "./ClueList";
+import CongratsDialog from "./CongratsDialog";
 import CrosswordGrid from "./CrosswordGrid";
 import CrosswordHeader from "./CrosswordHeader";
-import type { CrosswordListItem, NYTPuzzle } from "./nyt";
-import { useNYTPuzzle } from "./useNYTPuzzle";
+import ProfileDrawer from "./ProfileDrawer";
+import type {
+	CheckRevealScope,
+	Direction,
+	RenderModel,
+} from "./firebaseTypes";
+import { useCollaborativePuzzle } from "./useCollaborativePuzzle";
 import "./crossword.css";
 
-type Direction = "Across" | "Down";
-
-function getDefaultDate() {
-	return new Date().toISOString().slice(0, 10);
-}
+type CrosswordListItem = {
+	id: number;
+	label: string;
+	text: string;
+	direction: Direction;
+};
 
 function formatElapsedTime(totalSeconds: number) {
 	const hours = Math.floor(totalSeconds / 3600);
@@ -23,14 +31,8 @@ function formatElapsedTime(totalSeconds: number) {
 	).padStart(2, "0")}`;
 }
 
-function getClueText(puzzle: NYTPuzzle["puzzle"], clueId: number) {
-	return (
-		puzzle.clues[clueId]?.text.map((entry) => entry.plain).join(" ") ?? ""
-	);
-}
-
 function buildClueItems(
-	puzzle: NYTPuzzle["puzzle"],
+	puzzle: RenderModel,
 	direction: Direction,
 ): CrosswordListItem[] {
 	const clueList = puzzle.clueLists.find((list) => list.name === direction);
@@ -45,27 +47,27 @@ function buildClueItems(
 		return {
 			id: clueId,
 			label: clue.label,
-			text: getClueText(puzzle, clueId),
+			text: clue.text,
 			direction: clue.direction,
 		};
 	});
 }
 
 function getCellClueIdForDirection(
-	puzzle: NYTPuzzle["puzzle"],
+	puzzle: RenderModel,
 	cellIndex: number,
 	direction: Direction,
 ) {
 	const cell = puzzle.cells[cellIndex];
 	return (
-		cell?.clues?.find(
+		cell?.clueIds?.find(
 			(clueId) => puzzle.clues[clueId]?.direction === direction,
 		) ?? null
 	);
 }
 
 function getNextDirection(
-	puzzle: NYTPuzzle["puzzle"],
+	puzzle: RenderModel,
 	cellIndex: number,
 	currentDirection: Direction,
 ) {
@@ -82,7 +84,7 @@ function getNextDirection(
 }
 
 function moveWithinClue(
-	puzzle: NYTPuzzle["puzzle"],
+	puzzle: RenderModel,
 	cellIndex: number,
 	direction: Direction,
 	step: -1 | 1,
@@ -92,7 +94,7 @@ function moveWithinClue(
 		return null;
 	}
 
-	const clueCells = puzzle.clues[clueId]?.cells ?? [];
+	const clueCells = puzzle.clues[clueId]?.cellIndexes ?? [];
 	const currentPosition = clueCells.indexOf(cellIndex);
 	const nextCellIndex =
 		currentPosition >= 0 ? clueCells[currentPosition + step] : undefined;
@@ -101,19 +103,49 @@ function moveWithinClue(
 }
 
 export default function CrosswordPage() {
-	const [date] = useState(getDefaultDate);
-	const { data, isLoading, error } = useNYTPuzzle(date);
-	const [selectedCellIndex, setSelectedCellIndex] = useState<number | null>(
-		null,
-	);
-	const [selectedDirection, setSelectedDirection] =
-		useState<Direction>("Across");
-	const [guesses, setGuesses] = useState<Record<number, string>>({});
+	const {
+		authReady,
+		user,
+		currentProfile,
+		profiles,
+		puzzleMeta,
+		renderModel,
+		puzzleState,
+		activeUsers,
+		selectedCellIndex,
+		selectedDirection,
+		monthViewDate,
+		monthStatuses,
+		error,
+		isBusy,
+		showCongrats,
+		setShowCongrats,
+		setSelectedCellIndex,
+		setSelectedDirection,
+		setMonthViewDate,
+		signIn,
+		createAccount,
+		signOut,
+		openPuzzle,
+		updateGuess,
+		deleteGuess,
+		checkSelection,
+		revealSelection,
+		updateProfile,
+	} = useCollaborativePuzzle();
 	const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-	const puzzle = data?.puzzle ?? null;
+	const [showOwnership, setShowOwnership] = useState(false);
+	const [showProfileDrawer, setShowProfileDrawer] = useState(false);
+	const [showActionMenu, setShowActionMenu] = useState(false);
+	const [cluesMaxHeight, setCluesMaxHeight] = useState<number | null>(null);
+	const boardPanelRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
+		if (!user || !puzzleMeta) {
+			setElapsedSeconds(0);
+			return;
+		}
+
 		const intervalId = window.setInterval(() => {
 			setElapsedSeconds((currentSeconds) => currentSeconds + 1);
 		}, 1000);
@@ -121,49 +153,65 @@ export default function CrosswordPage() {
 		return () => {
 			window.clearInterval(intervalId);
 		};
+	}, [puzzleMeta, user]);
+
+	useEffect(() => {
+		function handleKeyDown(event: KeyboardEvent) {
+			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+				event.preventDefault();
+				setShowOwnership((current) => !current);
+			}
+		}
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => {
+			window.removeEventListener("keydown", handleKeyDown);
+		};
 	}, []);
 
 	useEffect(() => {
-		if (!puzzle) {
-			setSelectedCellIndex(null);
+		const boardPanel = boardPanelRef.current;
+		if (!boardPanel || typeof ResizeObserver === "undefined") {
 			return;
 		}
 
-		const firstPlayableIndex = puzzle.cells.findIndex((cell) =>
-			Boolean(cell.answer),
-		);
-		setSelectedCellIndex(
-			firstPlayableIndex >= 0 ? firstPlayableIndex : null,
-		);
-		setSelectedDirection("Across");
-		setGuesses({});
-		setElapsedSeconds(0);
-	}, [puzzle]);
+		const observer = new ResizeObserver((entries) => {
+			const entry = entries[0];
+			if (!entry) {
+				return;
+			}
+
+			setCluesMaxHeight(entry.contentRect.height);
+		});
+
+		observer.observe(boardPanel);
+		return () => observer.disconnect();
+	}, [renderModel]);
 
 	const activeClueId = useMemo(() => {
-		if (!puzzle || selectedCellIndex === null) {
+		if (!renderModel || selectedCellIndex === null) {
 			return null;
 		}
 
 		return getCellClueIdForDirection(
-			puzzle,
+			renderModel,
 			selectedCellIndex,
 			selectedDirection,
 		);
-	}, [puzzle, selectedCellIndex, selectedDirection]);
+	}, [renderModel, selectedCellIndex, selectedDirection]);
 	const crossingClueId = useMemo(() => {
-		if (!puzzle || selectedCellIndex === null) {
+		if (!renderModel || selectedCellIndex === null) {
 			return null;
 		}
 
 		const crossingDirection =
 			selectedDirection === "Across" ? "Down" : "Across";
 		return getCellClueIdForDirection(
-			puzzle,
+			renderModel,
 			selectedCellIndex,
 			crossingDirection,
 		);
-	}, [puzzle, selectedCellIndex, selectedDirection]);
+	}, [renderModel, selectedCellIndex, selectedDirection]);
 	const markedClueIds = useMemo(() => {
 		if (crossingClueId === null) {
 			return new Set<number>();
@@ -172,58 +220,78 @@ export default function CrosswordPage() {
 		return new Set([crossingClueId]);
 	}, [crossingClueId]);
 	const primaryHighlightedCellIndexes = useMemo(() => {
-		if (!puzzle || activeClueId === null) {
+		if (!renderModel || activeClueId === null) {
 			return new Set<number>();
 		}
 
-		return new Set(puzzle.clues[activeClueId]?.cells ?? []);
-	}, [activeClueId, puzzle]);
+		return new Set(renderModel.clues[activeClueId]?.cellIndexes ?? []);
+	}, [activeClueId, renderModel]);
 	const secondaryHighlightedCellIndexes = useMemo(() => {
-		if (!puzzle || crossingClueId === null) {
+		if (!renderModel || crossingClueId === null) {
 			return new Set<number>();
 		}
 
-		return new Set(puzzle.clues[crossingClueId]?.cells ?? []);
-	}, [crossingClueId, puzzle]);
+		return new Set(renderModel.clues[crossingClueId]?.cellIndexes ?? []);
+	}, [crossingClueId, renderModel]);
 
 	useEffect(() => {
-		if (!puzzle || selectedCellIndex === null) {
+		if (!renderModel || selectedCellIndex === null) {
 			return;
 		}
 
 		setSelectedDirection((currentDirection) =>
-			getNextDirection(puzzle, selectedCellIndex, currentDirection),
+			getNextDirection(renderModel, selectedCellIndex, currentDirection),
 		);
-	}, [puzzle, selectedCellIndex]);
+	}, [renderModel, selectedCellIndex, setSelectedDirection]);
 
 	const activeClueLabel = useMemo(() => {
-		if (!puzzle || activeClueId === null) {
+		if (!renderModel || activeClueId === null) {
 			return "";
 		}
 
-		const clue = puzzle.clues[activeClueId];
+		const clue = renderModel.clues[activeClueId];
 		return `${clue.label}${clue.direction === "Across" ? "A" : "D"}`;
-	}, [activeClueId, puzzle]);
+	}, [activeClueId, renderModel]);
 
 	const activeClueText = useMemo(() => {
-		if (!puzzle || activeClueId === null) {
+		if (!renderModel || activeClueId === null) {
 			return "Select a cell to view its clue.";
 		}
 
-		return getClueText(puzzle, activeClueId);
-	}, [activeClueId, puzzle]);
+		return renderModel.clues[activeClueId]?.text ?? "";
+	}, [activeClueId, renderModel]);
 
 	const acrossClues = useMemo(
-		() => (puzzle ? buildClueItems(puzzle, "Across") : []),
-		[puzzle],
+		() => (renderModel ? buildClueItems(renderModel, "Across") : []),
+		[renderModel],
 	);
 	const downClues = useMemo(
-		() => (puzzle ? buildClueItems(puzzle, "Down") : []),
-		[puzzle],
+		() => (renderModel ? buildClueItems(renderModel, "Down") : []),
+		[renderModel],
+	);
+
+	const remoteSelections = useMemo(
+		() =>
+			activeUsers
+				.filter((activeUser) => activeUser.uid !== user?.uid)
+				.map((activeUser) => ({
+					uid: activeUser.uid,
+					color: activeUser.color,
+					selectedCellIndex: activeUser.selectedCellIndex ?? null,
+				})),
+		[activeUsers, user],
+	);
+
+	const guessOwners = useMemo(
+		() =>
+			Object.fromEntries(
+				Object.entries(profiles).map(([uid, profile]) => [uid, profile]),
+			),
+		[profiles],
 	);
 
 	const handleSelectCell = (cellIndex: number) => {
-		if (!puzzle) {
+		if (!renderModel) {
 			return;
 		}
 
@@ -232,7 +300,7 @@ export default function CrosswordPage() {
 				selectedDirection === "Across" ? "Down" : "Across";
 			if (
 				getCellClueIdForDirection(
-					puzzle,
+					renderModel,
 					cellIndex,
 					toggledDirection,
 				) !== null
@@ -244,38 +312,40 @@ export default function CrosswordPage() {
 
 		setSelectedCellIndex(cellIndex);
 		setSelectedDirection(
-			getNextDirection(puzzle, cellIndex, selectedDirection),
+			getNextDirection(renderModel, cellIndex, selectedDirection),
 		);
 	};
 
 	const handleSelectClue = (clueId: number) => {
-		if (!puzzle) {
+		if (!renderModel) {
 			return;
 		}
 
-		const firstCellIndex = puzzle.clues[clueId]?.cells[0];
+		const firstCellIndex = renderModel.clues[clueId]?.cellIndexes[0];
 		if (typeof firstCellIndex === "number") {
 			setSelectedCellIndex(firstCellIndex);
-			setSelectedDirection(puzzle.clues[clueId].direction);
+			setSelectedDirection(renderModel.clues[clueId].direction);
 		}
 	};
 
-	const handleUpdateGuess = (cellIndex: number, value: string) => {
-		if (!puzzle) {
+	const handleUpdateGuess = async (cellIndex: number, value: string) => {
+		if (!renderModel) {
 			return;
 		}
 
-		setGuesses((currentGuesses) => ({
-			...currentGuesses,
-			[cellIndex]: value,
-		}));
+		const cell = renderModel.cells[cellIndex];
+		const isRebusCell = (cell.type ?? 1) !== 1;
+		const nextValue = isRebusCell
+			? value.toUpperCase()
+			: value.slice(0, 1).toUpperCase();
 
-		if (!value) {
+		if (!nextValue) {
+			await updateGuess(cellIndex, nextValue);
 			return;
 		}
 
 		const clueId = getCellClueIdForDirection(
-			puzzle,
+			renderModel,
 			cellIndex,
 			selectedDirection,
 		);
@@ -283,7 +353,7 @@ export default function CrosswordPage() {
 			return;
 		}
 
-		const clueCells = puzzle.clues[clueId]?.cells ?? [];
+		const clueCells = renderModel.clues[clueId]?.cellIndexes ?? [];
 		const currentPosition = clueCells.indexOf(cellIndex);
 		const nextCellIndex =
 			currentPosition >= 0 ? clueCells[currentPosition + 1] : undefined;
@@ -291,25 +361,24 @@ export default function CrosswordPage() {
 		if (typeof nextCellIndex === "number") {
 			setSelectedCellIndex(nextCellIndex);
 		}
+
+		await updateGuess(cellIndex, nextValue);
 	};
 
-	const handleDeleteGuess = (cellIndex: number) => {
-		if (!puzzle) {
+	const handleDeleteGuess = async (cellIndex: number) => {
+		if (!renderModel) {
 			return;
 		}
 
-		const currentValue = guesses[cellIndex] ?? "";
+		const currentValue = puzzleState.guesses[String(cellIndex)]?.value ?? "";
 		if (currentValue) {
-			setGuesses((currentGuesses) => ({
-				...currentGuesses,
-				[cellIndex]: "",
-			}));
+			await deleteGuess(cellIndex);
 			setSelectedCellIndex(cellIndex);
 			return;
 		}
 
 		const clueId = getCellClueIdForDirection(
-			puzzle,
+			renderModel,
 			cellIndex,
 			selectedDirection,
 		);
@@ -317,18 +386,19 @@ export default function CrosswordPage() {
 			return;
 		}
 
-		const clueCells = puzzle.clues[clueId]?.cells ?? [];
+		const clueCells = renderModel.clues[clueId]?.cellIndexes ?? [];
 		const currentPosition = clueCells.indexOf(cellIndex);
 		const previousCellIndex =
 			currentPosition > 0 ? clueCells[currentPosition - 1] : undefined;
 
 		if (typeof previousCellIndex === "number") {
+			await deleteGuess(previousCellIndex);
 			setSelectedCellIndex(previousCellIndex);
 		}
 	};
 
 	const handleMoveSelection = (cellIndex: number, key: string) => {
-		if (!puzzle) {
+		if (!renderModel) {
 			return;
 		}
 
@@ -338,7 +408,7 @@ export default function CrosswordPage() {
 		if (selectedDirection !== targetDirection) {
 			if (
 				getCellClueIdForDirection(
-					puzzle,
+					renderModel,
 					cellIndex,
 					targetDirection,
 				) !== null
@@ -351,7 +421,7 @@ export default function CrosswordPage() {
 
 		const step: -1 | 1 = key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1;
 		const nextCellIndex = moveWithinClue(
-			puzzle,
+			renderModel,
 			cellIndex,
 			selectedDirection,
 			step,
@@ -362,95 +432,146 @@ export default function CrosswordPage() {
 		}
 	};
 
+	if (!authReady) {
+		return <div className="crossword-page crossword-page--loading">Loading…</div>;
+	}
+
+	if (!user) {
+		return (
+			<AuthScreen
+				isBusy={isBusy}
+				error={error}
+				onLogin={signIn}
+				onCreateAccount={createAccount}
+			/>
+		);
+	}
+
+	const actionItems: Array<{
+		label: string;
+		scope: CheckRevealScope;
+		action: "check" | "reveal";
+	}> = [
+		{ label: "Check Cell", scope: "cell", action: "check" },
+		{ label: "Check Word", scope: "word", action: "check" },
+		{ label: "Check Puzzle", scope: "puzzle", action: "check" },
+		{ label: "Reveal Cell", scope: "cell", action: "reveal" },
+		{ label: "Reveal Word", scope: "word", action: "reveal" },
+		{ label: "Reveal Puzzle", scope: "puzzle", action: "reveal" },
+	];
+
 	return (
 		<div className="crossword-page">
-			<CrosswordHeader puzzle={data} />
+			<CrosswordHeader
+				puzzle={puzzleMeta}
+				currentProfile={currentProfile}
+				activeUsers={activeUsers}
+				monthViewDate={monthViewDate}
+				monthStatuses={monthStatuses}
+				selectedDate={puzzleMeta?.publicationDate ?? null}
+				showOwnership={showOwnership}
+				onOpenMenu={() => setShowProfileDrawer(true)}
+				onChangeMonth={setMonthViewDate}
+				onSelectDate={(date) => void openPuzzle(date)}
+			/>
 
 			<section className="crossword-toolbar" aria-label="Puzzle tools">
 				<div className="crossword-toolbar__left">
-					{/* <button
-						type="button"
-						className="crossword-icon-button crossword-icon-button--gear"
-						aria-label="Puzzle settings"
-					>
-						<span
-							className="crossword-gear-icon"
-							aria-hidden="true"
-						/>
-					</button> */}
+					{error ? <span className="crossword-toolbar__error">{error}</span> : null}
 				</div>
 
 				<div className="crossword-toolbar__timer">
-					{isLoading ? "Loading…" : formatElapsedTime(elapsedSeconds)}
+					{isBusy ? "Syncing…" : formatElapsedTime(elapsedSeconds)}
 				</div>
 
 				<div className="crossword-toolbar__actions">
 					<button
 						type="button"
 						className="crossword-toolbar__text-button"
+						onClick={() => setShowOwnership((current) => !current)}
 					>
-						Rebus
+						{showOwnership ? "Hide Edits" : "Show Edits"}
 					</button>
-					<button
-						type="button"
-						className="crossword-toolbar__text-button"
-					>
-						Reset
-					</button>
-					<button
-						type="button"
-						className="crossword-toolbar__text-button"
-					>
-						Reveal
-					</button>
-					<button
-						type="button"
-						className="crossword-toolbar__text-button"
-					>
-						Check
-					</button>
-					{/* <button
-						type="button"
-						className="crossword-icon-button crossword-icon-button--pencil"
-						aria-label="Toggle pencil"
-					>
-						<span className="crossword-pencil-icon" aria-hidden="true" />
-					</button> */}
+					<div className="crossword-toolbar__menu">
+						<button
+							type="button"
+							className="crossword-toolbar__icon-button"
+							aria-label="Check and reveal actions"
+							onClick={() => setShowActionMenu((current) => !current)}
+						>
+							✓
+						</button>
+						{showActionMenu ? (
+							<div className="crossword-toolbar__dropdown">
+								{actionItems.map((item) => (
+									<button
+										key={item.label}
+										type="button"
+										onClick={() => {
+											setShowActionMenu(false);
+											if (item.action === "check") {
+												void checkSelection(item.scope);
+												return;
+											}
+
+											void revealSelection(item.scope);
+										}}
+									>
+										{item.label}
+									</button>
+								))}
+							</div>
+						) : null}
+					</div>
 				</div>
 			</section>
 
 			<main className="crossword-layout">
-				{puzzle ? (
-					<CrosswordGrid
-						puzzle={puzzle}
-						selectedCellIndex={selectedCellIndex}
-						primaryHighlightedCellIndexes={
-							primaryHighlightedCellIndexes
-						}
-						secondaryHighlightedCellIndexes={
-							secondaryHighlightedCellIndexes
-						}
-						activeClueLabel={activeClueLabel}
-						activeClueText={activeClueText}
-						guesses={guesses}
-						onSelectCell={handleSelectCell}
-						onUpdateGuess={handleUpdateGuess}
-						onDeleteGuess={handleDeleteGuess}
-						onMoveSelection={handleMoveSelection}
-					/>
+				{renderModel ? (
+					<div
+						ref={boardPanelRef}
+						className="crossword-board-panel-wrap"
+					>
+						<CrosswordGrid
+							puzzle={renderModel}
+							selectedCellIndex={selectedCellIndex}
+							primaryHighlightedCellIndexes={
+								primaryHighlightedCellIndexes
+							}
+							secondaryHighlightedCellIndexes={
+								secondaryHighlightedCellIndexes
+							}
+							activeClueLabel={activeClueLabel}
+							activeClueText={activeClueText}
+							puzzleState={puzzleState}
+							guessOwners={guessOwners}
+							remoteSelections={remoteSelections}
+							showOwnership={showOwnership}
+							onSelectCell={handleSelectCell}
+							onUpdateGuess={(cellIndex, value) =>
+								void handleUpdateGuess(cellIndex, value)
+							}
+							onDeleteGuess={(cellIndex) => void handleDeleteGuess(cellIndex)}
+							onMoveSelection={handleMoveSelection}
+						/>
+					</div>
 				) : (
 					<section
-						className="crossword-board-panel"
+						className="crossword-board-panel crossword-board-panel--empty"
 						aria-label="Game board with clue bar"
 					>
 						<div className="crossword-clue-bar">
 							<div className="crossword-clue-bar__text">
-								{error ?? "Loading puzzle…"}
+								Pick a date in the calendar to load a puzzle.
 							</div>
 						</div>
 					</section>
 				)}
-				<section className="crossword-clues" aria-label="Clue lists">
+				<section
+					className="crossword-clues"
+					aria-label="Clue lists"
+					style={cluesMaxHeight ? { height: cluesMaxHeight } : undefined}
+				>
 					<ClueList
 						title="Across"
 						clues={acrossClues}
@@ -467,6 +588,21 @@ export default function CrosswordPage() {
 					/>
 				</section>
 			</main>
+
+			<ProfileDrawer
+				isOpen={showProfileDrawer}
+				profile={currentProfile}
+				onClose={() => setShowProfileDrawer(false)}
+				onSave={async (input) => {
+					await updateProfile(input);
+					setShowProfileDrawer(false);
+				}}
+				onSignOut={signOut}
+			/>
+			<CongratsDialog
+				isOpen={showCongrats}
+				onDismiss={() => setShowCongrats(false)}
+			/>
 		</div>
 	);
 }
