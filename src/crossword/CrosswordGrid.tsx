@@ -27,6 +27,8 @@ type CrosswordGridProps = {
 	onUpdateGuess: (cellIndex: number, value: string) => void;
 	onDeleteGuess: (cellIndex: number) => void;
 	onMoveSelection: (cellIndex: number, key: string) => void;
+	onJumpSelection: (cellIndex: number, key: string) => void;
+	onRequestJumpToClue: () => void;
 };
 
 export default function CrosswordGrid({
@@ -44,6 +46,8 @@ export default function CrosswordGrid({
 	onUpdateGuess,
 	onDeleteGuess,
 	onMoveSelection,
+	onJumpSelection,
+	onRequestJumpToClue,
 }: CrosswordGridProps) {
 	const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -163,7 +167,17 @@ export default function CrosswordGrid({
 									event.key === "ArrowRight"
 								) {
 									event.preventDefault();
+									if (event.metaKey) {
+										onJumpSelection(cellIndex, event.key);
+										return;
+									}
 									onMoveSelection(cellIndex, event.key);
+									return;
+								}
+
+								if (event.metaKey && event.key.toLowerCase() === "j") {
+									event.preventDefault();
+									onRequestJumpToClue();
 									return;
 								}
 

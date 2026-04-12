@@ -442,6 +442,8 @@ export const checkSelection = onCall({ cors: true }, async (request) => {
 	const updates: Record<string, unknown> = {
 		updatedAt: FieldValue.serverTimestamp(),
 	};
+	let incorrectCount = 0;
+	const firstCheckedCellIndex = cellIndexes[0] ?? null;
 
 	for (const cellIndex of cellIndexes) {
 		const guess = state.guesses?.[String(cellIndex)]?.value ?? "";
@@ -450,8 +452,13 @@ export const checkSelection = onCall({ cors: true }, async (request) => {
 			continue;
 		}
 
+		const isCorrect = guess.toUpperCase() === answer.toUpperCase();
+		if (!isCorrect) {
+			incorrectCount += 1;
+		}
+
 		updates[`cellAnnotations.${cellIndex}`] = {
-			status: guess.toUpperCase() === answer.toUpperCase() ? "correct" : "incorrect",
+			status: isCorrect ? "correct" : "incorrect",
 			checkedAt: FieldValue.serverTimestamp(),
 			checkedBy: uid,
 			revealed: false,
@@ -461,7 +468,19 @@ export const checkSelection = onCall({ cors: true }, async (request) => {
 	}
 
 	await db.doc(`puzzles/${puzzleId}/state/current`).set(updates, { merge: true });
-	return { updated: cellIndexes.length };
+	return {
+		updated: cellIndexes.length,
+		incorrectCount,
+		allCorrect: incorrectCount === 0,
+		debugFirstCell:
+			typeof firstCheckedCellIndex === "number"
+				? {
+						cellIndex: firstCheckedCellIndex,
+						guess: state.guesses?.[String(firstCheckedCellIndex)]?.value ?? "",
+						answer: answerKey[String(firstCheckedCellIndex)] ?? "",
+				  }
+				: null,
+	};
 });
 
 export const revealSelection = onCall({ cors: true }, async (request) => {

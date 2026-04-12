@@ -73,6 +73,12 @@ function getReadableErrorMessage(
 	return fallbackMessage;
 }
 
+function wait(ms: number) {
+	return new Promise((resolve) => {
+		window.setTimeout(resolve, ms);
+	});
+}
+
 function snapshotDate(value: unknown) {
 	if (
 		value &&
@@ -279,6 +285,7 @@ export function useCollaborativePuzzle() {
 	const [monthStatuses, setMonthStatuses] = useState<CalendarStatusMap>({});
 	const [error, setError] = useState<string | null>(getFirebaseConfigError());
 	const [isBusy, setIsBusy] = useState(false);
+	const [pendingGuessWriteCount, setPendingGuessWriteCount] = useState(0);
 	const [showCongrats, setShowCongrats] = useState(false);
 	const previousCompletionState = useRef<string | null>(null);
 
@@ -407,7 +414,8 @@ export function useCollaborativePuzzle() {
 			onSnapshot(
 				doc(firestore, "puzzles", activePuzzleId, "state", "current"),
 				(snapshot) => {
-					setPuzzleState(normalizeState(snapshot.data()));
+					const normalizedState = normalizeState(snapshot.data());
+					setPuzzleState(normalizedState);
 				},
 			),
 			onSnapshot(
@@ -663,7 +671,12 @@ export function useCollaborativePuzzle() {
 			},
 			{ merge: true },
 		);
-		await batch.commit();
+		setPendingGuessWriteCount((current) => current + 1);
+		try {
+			await batch.commit();
+		} finally {
+			setPendingGuessWriteCount((current) => Math.max(0, current - 1));
+		}
 	}
 
 	async function deleteGuess(cellIndex: number) {
@@ -680,6 +693,14 @@ export function useCollaborativePuzzle() {
 			selectedCellIndex === null ||
 			!user
 		) {
+			if (action === "checkSelection" && scope === "puzzle") {
+				console.log("[crossword check] skipped verification request", {
+					activePuzzleId,
+					selectedCellIndex,
+					hasFunctions: Boolean(functions),
+					hasUser: Boolean(user),
+				});
+			}
 			return;
 		}
 
@@ -687,13 +708,56 @@ export function useCollaborativePuzzle() {
 		setError(null);
 
 		try {
+			if (action === "checkSelection" && scope === "puzzle") {
+				console.log("[crossword check] requesting backend verification", {
+					puzzleId: activePuzzleId,
+					selectedCellIndex,
+					selectedDirection,
+				});
+			}
+
 			const callable = httpsCallable(functions, action);
-			await callable({
+			const result = await callable({
 				puzzleId: activePuzzleId,
 				scope,
 				anchorCellIndex: selectedCellIndex,
 				direction: selectedDirection,
 			});
+			if (action === "checkSelection" && scope === "puzzle") {
+				console.log("[crossword check] backend verification returned", {
+					puzzleId: activePuzzleId,
+					result: result.data,
+				});
+			}
+
+			if (action === "checkSelection" && firestore && activePuzzleId) {
+				for (let attempt = 0; attempt < 8; attempt += 1) {
+					const stateSnapshot = await getDoc(
+						doc(firestore, "puzzles", activePuzzleId, "state", "current"),
+					);
+					const normalizedState = normalizeState(stateSnapshot.data());
+					const annotationCount = Object.keys(
+						normalizedState.cellAnnotations,
+					).length;
+					if (annotationCount > 0 || attempt === 7) {
+						if (annotationCount === 0) {
+							console.log(
+								"[crossword check] backend verification produced no annotations",
+								{
+									puzzleId: activePuzzleId,
+									attempt,
+									revision: normalizedState.revision,
+								},
+							);
+						}
+						return normalizedState;
+					}
+
+					await wait(150);
+				}
+			}
+
+			return result.data;
 		} catch (caughtError) {
 			console.error(`${action} failed`, caughtError);
 			setError(
@@ -702,6 +766,7 @@ export function useCollaborativePuzzle() {
 					"Unable to update puzzle state.",
 				),
 			);
+			return null;
 		} finally {
 			setIsBusy(false);
 		}
@@ -754,6 +819,7 @@ export function useCollaborativePuzzle() {
 		monthStatuses,
 		error,
 		isBusy,
+		isSavingGuesses: pendingGuessWriteCount > 0,
 		showCongrats,
 		setShowCongrats,
 		setSelectedCellIndex,
