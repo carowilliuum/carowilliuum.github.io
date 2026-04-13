@@ -457,6 +457,7 @@ body {
 .crossword-board-panel {
 	display: grid;
 	gap: 16px;
+	container-type: inline-size;
 }
 
 .crossword-clue-bar {
@@ -484,6 +485,9 @@ body {
 	width: 100%;
 	border: 4px solid var(--crossword-border-strong);
 	background: var(--crossword-border-strong);
+	--crossword-grid-columns: 15;
+	font-size: 28px;
+	font-size: calc((100cqw - 8px) / var(--crossword-grid-columns));
 	touch-action: manipulation;
 }
 
@@ -550,7 +554,6 @@ body {
 	font-weight: 400;
 	line-height: 1;
 	color: var(--crossword-letter-default);
-	transition: 0.1s font-size;
 }
 
 .crossword-mobile-input {
@@ -1211,6 +1214,11 @@ body {
 	cursor: pointer;
 }
 
+.crossword-calendar__header button:disabled {
+	color: #b7b3a8;
+	cursor: not-allowed;
+}
+
 .crossword-calendar__weekday-row,
 .crossword-calendar__grid {
 	grid-template-columns: repeat(7, 1fr);
@@ -1235,6 +1243,11 @@ body {
 	cursor: pointer;
 }
 
+.crossword-calendar__day span {
+	position: relative;
+	z-index: 1;
+}
+
 .crossword-calendar__day--current-month {
 	color: var(--crossword-text);
 }
@@ -1243,26 +1256,36 @@ body {
 	color: #b7b3a8;
 }
 
-.crossword-calendar__day--selected {
-	background: #111827;
-	color: #ffffff;
+.crossword-calendar__day--future {
+	color: #beb9ad;
+	cursor: not-allowed;
+	opacity: 0.5;
 }
 
-.crossword-calendar__day--imported::after,
-.crossword-calendar__day--complete::after {
-	content: "☆";
-	position: absolute;
-	inset: -6px;
-	display: grid;
-	place-items: center;
-	font-size: 34px;
-	line-height: 1;
+.crossword-calendar__day--selected {
+	background: var(--crossword-yellow);
 	color: #111827;
+}
+
+.crossword-calendar__day--has-status::after {
+	content: "";
+	position: absolute;
+	inset: 5px;
+	z-index: 0;
+	border: 2px solid rgba(78, 149, 205, 0.8);
+	border-radius: 50%;
+	background: linear-gradient(
+		to top,
+		rgba(167, 216, 255, 0.68) 0%,
+		rgba(167, 216, 255, 0.68) var(--crossword-calendar-day-progress, 0%),
+		transparent var(--crossword-calendar-day-progress, 0%),
+		transparent 100%
+	);
 	pointer-events: none;
 }
 
-.crossword-calendar__day--complete::after {
-	content: "★";
+.crossword-calendar__day--future::after {
+	display: none;
 }
 
 .crossword-toolbar__menu {

@@ -209,7 +209,8 @@ export default function CrosswordGrid({
 				aria-label="Crossword puzzle grid"
 				style={{
 					gridTemplateColumns: `repeat(${puzzle.dimensions.width}, 1fr)`,
-				}}
+					"--crossword-grid-columns": puzzle.dimensions.width,
+				} as CSSProperties}
 			>
 				{puzzle.cells.map((cell) => {
 					const cellIndex = cell.index;
