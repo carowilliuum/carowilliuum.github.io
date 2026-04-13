@@ -1,16 +1,16 @@
 {
   "files": {
-    "main.css": "/static/css/main.aa7d39f8.css",
-    "main.js": "/static/js/main.811ac7cb.js",
+    "main.css": "/static/css/main.94d1c0d8.css",
+    "main.js": "/static/js/main.284da4ac.js",
     "static/js/453.4fc937e7.chunk.js": "/static/js/453.4fc937e7.chunk.js",
     "static/media/NYTKarnakCondensed.otf": "/static/media/NYTKarnakCondensed.627467d03df2bf6fa5d0.otf",
     "index.html": "/index.html",
-    "main.aa7d39f8.css.map": "/static/css/main.aa7d39f8.css.map",
-    "main.811ac7cb.js.map": "/static/js/main.811ac7cb.js.map",
+    "main.94d1c0d8.css.map": "/static/css/main.94d1c0d8.css.map",
+    "main.284da4ac.js.map": "/static/js/main.284da4ac.js.map",
     "453.4fc937e7.chunk.js.map": "/static/js/453.4fc937e7.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.aa7d39f8.css",
-    "static/js/main.811ac7cb.js"
+    "static/css/main.94d1c0d8.css",
+    "static/js/main.284da4ac.js"
   ]
 }
