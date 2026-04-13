@@ -20,6 +20,7 @@ type CrosswordGridProps = {
 	activeClueLabel: string;
 	activeClueText: string;
 	puzzleState: PuzzleState;
+	verifiedIncorrectCellIndexes: Set<number>;
 	guessOwners: Record<string, UserProfile | undefined>;
 	remoteSelections: RemoteSelection[];
 	showOwnership: boolean;
@@ -39,6 +40,7 @@ export default function CrosswordGrid({
 	activeClueLabel,
 	activeClueText,
 	puzzleState,
+	verifiedIncorrectCellIndexes,
 	guessOwners,
 	remoteSelections,
 	showOwnership,
@@ -112,6 +114,9 @@ export default function CrosswordGrid({
 							? "crossword-grid__cell--correct"
 							: "",
 						annotation?.status === "incorrect"
+							? "crossword-grid__cell--incorrect"
+							: "",
+						verifiedIncorrectCellIndexes.has(cellIndex)
 							? "crossword-grid__cell--incorrect"
 							: "",
 						annotation?.revealed ? "crossword-grid__cell--revealed" : "",

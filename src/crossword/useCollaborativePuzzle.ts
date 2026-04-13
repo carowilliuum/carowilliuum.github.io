@@ -73,12 +73,6 @@ function getReadableErrorMessage(
 	return fallbackMessage;
 }
 
-function wait(ms: number) {
-	return new Promise((resolve) => {
-		window.setTimeout(resolve, ms);
-	});
-}
-
 function snapshotDate(value: unknown) {
 	if (
 		value &&
@@ -728,33 +722,6 @@ export function useCollaborativePuzzle() {
 					puzzleId: activePuzzleId,
 					result: result.data,
 				});
-			}
-
-			if (action === "checkSelection" && firestore && activePuzzleId) {
-				for (let attempt = 0; attempt < 8; attempt += 1) {
-					const stateSnapshot = await getDoc(
-						doc(firestore, "puzzles", activePuzzleId, "state", "current"),
-					);
-					const normalizedState = normalizeState(stateSnapshot.data());
-					const annotationCount = Object.keys(
-						normalizedState.cellAnnotations,
-					).length;
-					if (annotationCount > 0 || attempt === 7) {
-						if (annotationCount === 0) {
-							console.log(
-								"[crossword check] backend verification produced no annotations",
-								{
-									puzzleId: activePuzzleId,
-									attempt,
-									revision: normalizedState.revision,
-								},
-							);
-						}
-						return normalizedState;
-					}
-
-					await wait(150);
-				}
 			}
 
 			return result.data;

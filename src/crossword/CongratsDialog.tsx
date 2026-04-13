@@ -12,10 +12,8 @@ type CongratsDialogProps = {
 	incorrectCount?: number;
 	contributors?: ContributionBar[];
 	showContributionChart?: boolean;
-	hintText?: string | null;
 	onDismiss: () => void;
 	onToggleContributionChart?: () => void;
-	onRequestHint?: () => void;
 };
 
 export default function CongratsDialog({
@@ -24,10 +22,8 @@ export default function CongratsDialog({
 	incorrectCount = 0,
 	contributors = [],
 	showContributionChart = false,
-	hintText = null,
 	onDismiss,
 	onToggleContributionChart,
-	onRequestHint,
 }: CongratsDialogProps) {
 	if (!isOpen) {
 		return null;
@@ -84,15 +80,7 @@ export default function CongratsDialog({
 								? "Hide contribution chart"
 								: "Show contribution chart"}
 						</button>
-					) : isUnverified ? null : (
-						<button
-							type="button"
-							className="crossword-dialog__button crossword-dialog__button--accent"
-							onClick={onRequestHint}
-						>
-							Offer a hint
-						</button>
-					)}
+					) : null}
 					<button
 						type="button"
 						className="crossword-dialog__button crossword-dialog__button--ghost"
@@ -124,9 +112,6 @@ export default function CongratsDialog({
 					</div>
 				) : null}
 
-				{!isComplete && hintText ? (
-					<p className="crossword-dialog__hint">{hintText}</p>
-				) : null}
 			</div>
 		</div>
 	);

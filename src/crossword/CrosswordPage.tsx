@@ -9,7 +9,6 @@ import ProfileDrawer from "./ProfileDrawer";
 import type {
 	CheckRevealScope,
 	Direction,
-	PuzzleState,
 	RenderModel,
 } from "./firebaseTypes";
 import { useCollaborativePuzzle } from "./useCollaborativePuzzle";
@@ -127,7 +126,6 @@ function moveWithinClue(
 
 	return typeof nextCellIndex === "number" ? nextCellIndex : null;
 }
-
 export default function CrosswordPage() {
 	const {
 		authReady,
@@ -167,8 +165,9 @@ export default function CrosswordPage() {
 	const [jumpClueInput, setJumpClueInput] = useState("");
 	const [jumpError, setJumpError] = useState<string | null>(null);
 	const [showIncorrectDialog, setShowIncorrectDialog] = useState(false);
+	const [verifiedIncorrectCellIndexes, setVerifiedIncorrectCellIndexes] =
+		useState<number[]>([]);
 	const [showUnverifiedDialog, setShowUnverifiedDialog] = useState(false);
-	const [incorrectHint, setIncorrectHint] = useState<string | null>(null);
 	const [showContributionChart, setShowContributionChart] = useState(false);
 	const [cluesMaxHeight, setCluesMaxHeight] = useState<number | null>(null);
 	const boardPanelRef = useRef<HTMLDivElement | null>(null);
@@ -374,34 +373,6 @@ export default function CrosswordPage() {
 			),
 		[isPuzzleFullyChecked, playableCellIndexes, puzzleState.cellAnnotations],
 	);
-	const incorrectClueCandidates = useMemo(() => {
-		if (!renderModel) {
-			return [];
-		}
-
-		const candidates = new Map<
-			number,
-			{ label: string; direction: Direction; text: string }
-		>();
-
-		for (const cellIndex of incorrectCellIndexes) {
-			const cell = renderModel.cells[cellIndex];
-			for (const clueId of cell?.clueIds ?? []) {
-				const clue = renderModel.clues[clueId];
-				if (!clue) {
-					continue;
-				}
-
-				candidates.set(clueId, {
-					label: clue.label,
-					direction: clue.direction,
-					text: clue.text,
-				});
-			}
-		}
-
-		return Array.from(candidates.values());
-	}, [incorrectCellIndexes, renderModel]);
 	const contributionBars = useMemo(() => {
 		const counts = new Map<
 			string,
@@ -470,8 +441,8 @@ export default function CrosswordPage() {
 				? puzzleFillSignature
 				: null;
 			setShowIncorrectDialog(false);
+			setVerifiedIncorrectCellIndexes([]);
 			setShowUnverifiedDialog(false);
-			setIncorrectHint(null);
 			return;
 		}
 
@@ -479,8 +450,8 @@ export default function CrosswordPage() {
 			processedFillSignatureRef.current = null;
 			autoCheckedFillSignatureRef.current = null;
 			setShowIncorrectDialog(false);
+			setVerifiedIncorrectCellIndexes([]);
 			setShowUnverifiedDialog(false);
-			setIncorrectHint(null);
 			return;
 		}
 
@@ -505,17 +476,7 @@ export default function CrosswordPage() {
 			});
 			void (async () => {
 				const checkResult = (await checkSelection("puzzle")) as
-					| {
-							updated?: number;
-							incorrectCount?: number;
-							allCorrect?: boolean;
-							debugFirstCell?: {
-								cellIndex: number;
-								guess: string;
-								answer: string;
-							} | null;
-					  }
-					| PuzzleState
+					| { incorrectCellIndexes?: number[] }
 					| null;
 				if (
 					!checkResult ||
@@ -524,69 +485,31 @@ export default function CrosswordPage() {
 					return;
 				}
 
-				const checkedIncorrectCount =
-					"cellAnnotations" in checkResult
-						? Object.values(checkResult.cellAnnotations).filter(
-								(annotation) => annotation.status === "incorrect",
-						  ).length
-						: (checkResult.incorrectCount ?? 0);
-				const checkedAnnotationCount =
-					"cellAnnotations" in checkResult
-						? Object.keys(checkResult.cellAnnotations).length
-						: null;
-				const checkedAllCorrect =
-					"cellAnnotations" in checkResult
-						? checkedAnnotationCount === playableCellIndexes.length &&
-						  checkedIncorrectCount === 0
-						: (checkResult.allCorrect ?? checkedIncorrectCount === 0);
+				const checkedIncorrectCellIndexes =
+					checkResult.incorrectCellIndexes ?? [];
+				const checkedIncorrectCount = checkedIncorrectCellIndexes.length;
+				const checkedAllCorrect = checkedIncorrectCount === 0;
 
 				processedFillSignatureRef.current = puzzleFillSignature;
 				console.log("[crossword check] verification result", {
 					puzzleId,
 					fillSignature: puzzleFillSignature,
-					annotationCount: checkedAnnotationCount,
 					incorrectCount: checkedIncorrectCount,
 					allCorrect: checkedAllCorrect,
-					source:
-						"cellAnnotations" in checkResult
-							? "fetched-state"
-							: "function-result",
+					source: "function-result",
 					firstPlayableCellGuess: firstPlayableCellGuessDebug,
-					firstCheckedCellDebug:
-						"cellAnnotations" in checkResult
-							? null
-							: (checkResult.debugFirstCell ?? null),
 				});
-
-				if (
-					"cellAnnotations" in checkResult &&
-					checkedAnnotationCount !== playableCellIndexes.length
-				) {
-					console.log(
-						"[crossword check] verification unavailable after check",
-						{
-							puzzleId,
-							fillSignature: puzzleFillSignature,
-							annotationCount: checkedAnnotationCount,
-							expectedAnnotationCount: playableCellIndexes.length,
-						},
-					);
-					setShowCongrats(false);
-					setShowIncorrectDialog(false);
-					setShowUnverifiedDialog(true);
-					return;
-				}
 
 				if (checkedAllCorrect) {
 					setShowUnverifiedDialog(false);
 					setShowIncorrectDialog(false);
-					setIncorrectHint(null);
+					setVerifiedIncorrectCellIndexes([]);
 					setShowCongrats(true);
 					return;
 				}
 
 				setShowUnverifiedDialog(false);
-				setIncorrectHint(null);
+				setVerifiedIncorrectCellIndexes(checkedIncorrectCellIndexes);
 				setShowIncorrectDialog(true);
 			})();
 			return;
@@ -596,17 +519,17 @@ export default function CrosswordPage() {
 		if (incorrectCellIndexes.length === 0) {
 			setShowUnverifiedDialog(false);
 			setShowIncorrectDialog(false);
-			setIncorrectHint(null);
+			setVerifiedIncorrectCellIndexes([]);
 			setShowCongrats(true);
 			return;
 		}
 
 		setShowUnverifiedDialog(false);
-		setIncorrectHint(null);
+		setVerifiedIncorrectCellIndexes(incorrectCellIndexes);
 		setShowIncorrectDialog(true);
 	}, [
 		checkSelection,
-		incorrectCellIndexes.length,
+		incorrectCellIndexes,
 		isPuzzleFilled,
 		isPuzzleFullyChecked,
 		isPuzzleCheckedCorrect,
@@ -704,23 +627,6 @@ export default function CrosswordPage() {
 		setJumpClueInput("");
 		setJumpError(null);
 		setShowJumpPalette(true);
-	};
-
-	const handleRequestIncorrectHint = () => {
-		if (incorrectClueCandidates.length === 0) {
-			setIncorrectHint("Try checking one of the crossing entries near the marked cells.");
-			return;
-		}
-
-		const randomClue =
-			incorrectClueCandidates[
-				Math.floor(Math.random() * incorrectClueCandidates.length)
-			];
-		setIncorrectHint(
-			`Perhaps, you should look near ${randomClue.label}${
-				randomClue.direction === "Across" ? "A" : "D"
-			}: ${randomClue.text}`,
-		);
 	};
 
 	const handleSubmitJumpToClue = () => {
@@ -1101,6 +1007,9 @@ export default function CrosswordPage() {
 							activeClueLabel={activeClueLabel}
 							activeClueText={activeClueText}
 							puzzleState={puzzleState}
+							verifiedIncorrectCellIndexes={
+								new Set(verifiedIncorrectCellIndexes)
+							}
 							guessOwners={guessOwners}
 							remoteSelections={remoteSelections}
 							showOwnership={showOwnership}
@@ -1171,12 +1080,10 @@ export default function CrosswordPage() {
 			<CongratsDialog
 				isOpen={showIncorrectDialog}
 				variant="incorrect"
-				incorrectCount={incorrectCellIndexes.length}
-				hintText={incorrectHint}
-				onRequestHint={handleRequestIncorrectHint}
+				incorrectCount={verifiedIncorrectCellIndexes.length}
 				onDismiss={() => {
 					setShowIncorrectDialog(false);
-					setIncorrectHint(null);
+					setVerifiedIncorrectCellIndexes([]);
 				}}
 			/>
 			<CongratsDialog
