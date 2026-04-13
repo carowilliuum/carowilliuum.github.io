@@ -21,6 +21,9 @@ type CrosswordListItem = {
 	direction: Direction;
 };
 
+const INCORRECT_HINT_RADIUS = 3;
+const INCORRECT_HINT_FADE_MS = 15_000;
+
 function formatElapsedTime(totalSeconds: number) {
 	const hours = Math.floor(totalSeconds / 3600);
 	const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -126,6 +129,24 @@ function moveWithinClue(
 
 	return typeof nextCellIndex === "number" ? nextCellIndex : null;
 }
+
+function getCellCoordinates(puzzle: RenderModel, cellIndex: number) {
+	return {
+		row: Math.floor(cellIndex / puzzle.dimensions.width),
+		column: cellIndex % puzzle.dimensions.width,
+	};
+}
+
+function getManhattanDistance(
+	puzzle: RenderModel,
+	leftCellIndex: number,
+	rightCellIndex: number,
+) {
+	const left = getCellCoordinates(puzzle, leftCellIndex);
+	const right = getCellCoordinates(puzzle, rightCellIndex);
+	return Math.abs(left.row - right.row) + Math.abs(left.column - right.column);
+}
+
 export default function CrosswordPage() {
 	const {
 		authReady,
@@ -167,6 +188,9 @@ export default function CrosswordPage() {
 	const [showIncorrectDialog, setShowIncorrectDialog] = useState(false);
 	const [verifiedIncorrectCellIndexes, setVerifiedIncorrectCellIndexes] =
 		useState<number[]>([]);
+	const [activeIncorrectHintCenterCellIndexes, setActiveIncorrectHintCenterCellIndexes] =
+		useState<number[]>([]);
+	const [incorrectHintFadeProgress, setIncorrectHintFadeProgress] = useState(1);
 	const [showUnverifiedDialog, setShowUnverifiedDialog] = useState(false);
 	const [showContributionChart, setShowContributionChart] = useState(false);
 	const [cluesMaxHeight, setCluesMaxHeight] = useState<number | null>(null);
@@ -175,6 +199,7 @@ export default function CrosswordPage() {
 	const autoCheckedFillSignatureRef = useRef<string | null>(null);
 	const processedFillSignatureRef = useRef<string | null>(null);
 	const initializedPuzzleIdRef = useRef<string | null>(null);
+	const incorrectHintAnimationFrameRef = useRef<number | null>(null);
 
 	useEffect(() => {
 		function handleKeyDown(event: KeyboardEvent) {
@@ -442,6 +467,8 @@ export default function CrosswordPage() {
 				: null;
 			setShowIncorrectDialog(false);
 			setVerifiedIncorrectCellIndexes([]);
+			setActiveIncorrectHintCenterCellIndexes([]);
+			setIncorrectHintFadeProgress(1);
 			setShowUnverifiedDialog(false);
 			return;
 		}
@@ -451,6 +478,8 @@ export default function CrosswordPage() {
 			autoCheckedFillSignatureRef.current = null;
 			setShowIncorrectDialog(false);
 			setVerifiedIncorrectCellIndexes([]);
+			setActiveIncorrectHintCenterCellIndexes([]);
+			setIncorrectHintFadeProgress(1);
 			setShowUnverifiedDialog(false);
 			return;
 		}
@@ -504,6 +533,8 @@ export default function CrosswordPage() {
 					setShowUnverifiedDialog(false);
 					setShowIncorrectDialog(false);
 					setVerifiedIncorrectCellIndexes([]);
+					setActiveIncorrectHintCenterCellIndexes([]);
+					setIncorrectHintFadeProgress(1);
 					setShowCongrats(true);
 					return;
 				}
@@ -520,6 +551,8 @@ export default function CrosswordPage() {
 			setShowUnverifiedDialog(false);
 			setShowIncorrectDialog(false);
 			setVerifiedIncorrectCellIndexes([]);
+			setActiveIncorrectHintCenterCellIndexes([]);
+			setIncorrectHintFadeProgress(1);
 			setShowCongrats(true);
 			return;
 		}
@@ -542,10 +575,129 @@ export default function CrosswordPage() {
 	]);
 
 	useEffect(() => {
+		if (activeIncorrectHintCenterCellIndexes.length === 0) {
+			setIncorrectHintFadeProgress(1);
+			if (incorrectHintAnimationFrameRef.current !== null) {
+				window.cancelAnimationFrame(incorrectHintAnimationFrameRef.current);
+				incorrectHintAnimationFrameRef.current = null;
+			}
+			return;
+		}
+
+		const startedAt = window.performance.now();
+
+		const tick = (now: number) => {
+			const nextProgress = Math.min(
+				(now - startedAt) / INCORRECT_HINT_FADE_MS,
+				1,
+			);
+			setIncorrectHintFadeProgress(nextProgress);
+
+			if (nextProgress >= 1) {
+				setActiveIncorrectHintCenterCellIndexes([]);
+				incorrectHintAnimationFrameRef.current = null;
+				return;
+			}
+
+			incorrectHintAnimationFrameRef.current =
+				window.requestAnimationFrame(tick);
+		};
+
+		setIncorrectHintFadeProgress(0);
+		incorrectHintAnimationFrameRef.current = window.requestAnimationFrame(tick);
+
+		return () => {
+			if (incorrectHintAnimationFrameRef.current !== null) {
+				window.cancelAnimationFrame(incorrectHintAnimationFrameRef.current);
+				incorrectHintAnimationFrameRef.current = null;
+			}
+		};
+	}, [activeIncorrectHintCenterCellIndexes]);
+
+	useEffect(() => {
 		if (!showCongrats) {
 			setShowContributionChart(false);
 		}
 	}, [showCongrats]);
+
+	const proximityHintIntensityByCellIndex = useMemo(() => {
+		if (
+			!renderModel ||
+			activeIncorrectHintCenterCellIndexes.length === 0 ||
+			incorrectHintFadeProgress >= 1
+		) {
+			return new Map<number, number>();
+		}
+
+		const fadeMultiplier = 1 - incorrectHintFadeProgress;
+		const nextEntries = new Map<number, number>();
+
+		for (const cell of renderModel.cells) {
+			if (cell.isBlock) {
+				continue;
+			}
+
+			const distances = activeIncorrectHintCenterCellIndexes.map((hintCellIndex) =>
+				getManhattanDistance(renderModel, cell.index, hintCellIndex),
+			);
+			const shortestDistance = Math.min(...distances);
+			if (shortestDistance > INCORRECT_HINT_RADIUS) {
+				continue;
+			}
+
+			const distanceWeight =
+				(INCORRECT_HINT_RADIUS + 1 - shortestDistance) /
+				(INCORRECT_HINT_RADIUS + 1);
+			nextEntries.set(cell.index, 0.4 * distanceWeight * fadeMultiplier);
+		}
+
+		return nextEntries;
+	}, [
+		activeIncorrectHintCenterCellIndexes,
+		incorrectHintFadeProgress,
+		renderModel,
+	]);
+
+	const shouldHideExactIncorrectStyling =
+		isPuzzleFilled &&
+		(verifiedIncorrectCellIndexes.length > 0 || incorrectCellIndexes.length > 0);
+
+	const handleShowIncorrectHint = () => {
+		if (!renderModel || verifiedIncorrectCellIndexes.length === 0) {
+			return;
+		}
+
+		const playableCellIndexes = renderModel.cells
+			.filter((cell) => !cell.isBlock)
+			.map((cell) => cell.index);
+		const hintCenterCellIndexes = verifiedIncorrectCellIndexes
+			.map((incorrectCellIndex) => {
+				const candidateCellIndexes = playableCellIndexes.filter((cellIndex) => {
+					const distance = getManhattanDistance(
+						renderModel,
+						cellIndex,
+						incorrectCellIndex,
+					);
+					return distance > 0 && distance <= INCORRECT_HINT_RADIUS;
+				});
+
+				if (candidateCellIndexes.length === 0) {
+					return null;
+				}
+
+				return candidateCellIndexes[
+					Math.floor(Math.random() * candidateCellIndexes.length)
+				];
+			})
+			.filter((cellIndex): cellIndex is number => cellIndex !== null);
+
+		if (hintCenterCellIndexes.length === 0) {
+			return;
+		}
+
+		setActiveIncorrectHintCenterCellIndexes(hintCenterCellIndexes);
+		setShowIncorrectDialog(false);
+	};
 
 	const handleSelectCell = (cellIndex: number) => {
 		if (!renderModel) {
@@ -1010,6 +1162,10 @@ export default function CrosswordPage() {
 							verifiedIncorrectCellIndexes={
 								new Set(verifiedIncorrectCellIndexes)
 							}
+							hideIncorrectStyling={shouldHideExactIncorrectStyling}
+							proximityHintIntensityByCellIndex={
+								proximityHintIntensityByCellIndex
+							}
 							guessOwners={guessOwners}
 							remoteSelections={remoteSelections}
 							showOwnership={showOwnership}
@@ -1081,9 +1237,10 @@ export default function CrosswordPage() {
 				isOpen={showIncorrectDialog}
 				variant="incorrect"
 				incorrectCount={verifiedIncorrectCellIndexes.length}
+				primaryActionLabel="Show hint"
+				onPrimaryAction={handleShowIncorrectHint}
 				onDismiss={() => {
 					setShowIncorrectDialog(false);
-					setVerifiedIncorrectCellIndexes([]);
 				}}
 			/>
 			<CongratsDialog

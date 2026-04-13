@@ -488,6 +488,11 @@ body {
 	font: inherit;
 	text-align: left;
 	cursor: pointer;
+	background-image: linear-gradient(
+		var(--crossword-cell-hint-overlay, rgba(210, 50, 50, 0)),
+		var(--crossword-cell-hint-overlay, rgba(210, 50, 50, 0))
+	);
+	transition: background-image 120ms linear;
 }
 
 .crossword-grid__cell:focus,

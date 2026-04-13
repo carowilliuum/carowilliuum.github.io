@@ -12,7 +12,9 @@ type CongratsDialogProps = {
 	incorrectCount?: number;
 	contributors?: ContributionBar[];
 	showContributionChart?: boolean;
+	primaryActionLabel?: string;
 	onDismiss: () => void;
+	onPrimaryAction?: () => void;
 	onToggleContributionChart?: () => void;
 };
 
@@ -22,7 +24,9 @@ export default function CongratsDialog({
 	incorrectCount = 0,
 	contributors = [],
 	showContributionChart = false,
+	primaryActionLabel,
 	onDismiss,
+	onPrimaryAction,
 	onToggleContributionChart,
 }: CongratsDialogProps) {
 	if (!isOpen) {
@@ -79,6 +83,14 @@ export default function CongratsDialog({
 							{showContributionChart
 								? "Hide contribution chart"
 								: "Show contribution chart"}
+							</button>
+					) : primaryActionLabel && onPrimaryAction ? (
+						<button
+							type="button"
+							className="crossword-dialog__button crossword-dialog__button--accent"
+							onClick={onPrimaryAction}
+						>
+							{primaryActionLabel}
 						</button>
 					) : null}
 					<button
