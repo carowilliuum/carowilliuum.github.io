@@ -24,6 +24,7 @@ type CrosswordListItem = {
 
 const INCORRECT_HINT_RADIUS = 3;
 const INCORRECT_HINT_FADE_MS = 15_000;
+const MOBILE_BREAKPOINT_PX = 900;
 
 function formatElapsedTime(totalSeconds: number) {
 	const hours = Math.floor(totalSeconds / 3600);
@@ -195,12 +196,54 @@ export default function CrosswordPage() {
 	const [showUnverifiedDialog, setShowUnverifiedDialog] = useState(false);
 	const [showContributionChart, setShowContributionChart] = useState(false);
 	const [cluesMaxHeight, setCluesMaxHeight] = useState<number | null>(null);
+	const [isSmallScreen, setIsSmallScreen] = useState(() => {
+		if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+			return false;
+		}
+
+		return window.matchMedia(
+			`(max-width: ${MOBILE_BREAKPOINT_PX}px)`,
+		).matches;
+	});
+	const [mobileClueDirection, setMobileClueDirection] =
+		useState<Direction>("Across");
 	const boardPanelRef = useRef<HTMLDivElement | null>(null);
 	const jumpInputRef = useRef<HTMLInputElement | null>(null);
 	const autoCheckedFillSignatureRef = useRef<string | null>(null);
 	const processedFillSignatureRef = useRef<string | null>(null);
 	const initializedPuzzleIdRef = useRef<string | null>(null);
 	const incorrectHintAnimationFrameRef = useRef<number | null>(null);
+
+	useEffect(() => {
+		if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+			return;
+		}
+
+		const mediaQuery = window.matchMedia(
+			`(max-width: ${MOBILE_BREAKPOINT_PX}px)`,
+		);
+		const legacyMediaQuery = mediaQuery as MediaQueryList & {
+			addListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+			removeListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+		};
+		const handleChange = (event: MediaQueryListEvent) => {
+			setIsSmallScreen(event.matches);
+		};
+
+		setIsSmallScreen(mediaQuery.matches);
+		if (typeof mediaQuery.addEventListener === "function") {
+			mediaQuery.addEventListener("change", handleChange);
+		} else if (typeof legacyMediaQuery.addListener === "function") {
+			legacyMediaQuery.addListener(handleChange);
+		}
+		return () => {
+			if (typeof mediaQuery.removeEventListener === "function") {
+				mediaQuery.removeEventListener("change", handleChange);
+			} else if (typeof legacyMediaQuery.removeListener === "function") {
+				legacyMediaQuery.removeListener(handleChange);
+			}
+		};
+	}, []);
 
 	useEffect(() => {
 		function handleKeyDown(event: KeyboardEvent) {
@@ -217,6 +260,11 @@ export default function CrosswordPage() {
 	}, []);
 
 	useEffect(() => {
+		if (isSmallScreen) {
+			setCluesMaxHeight(null);
+			return;
+		}
+
 		const boardPanel = boardPanelRef.current;
 		if (!boardPanel) {
 			return;
@@ -239,7 +287,7 @@ export default function CrosswordPage() {
 
 		observer.observe(boardPanel);
 		return () => observer.disconnect();
-	}, [renderModel]);
+	}, [isSmallScreen, renderModel]);
 
 	useEffect(() => {
 		if (!showJumpPalette) {
@@ -249,6 +297,26 @@ export default function CrosswordPage() {
 		jumpInputRef.current?.focus();
 		jumpInputRef.current?.select();
 	}, [showJumpPalette]);
+
+	useEffect(() => {
+		if (!isSmallScreen) {
+			return;
+		}
+
+		setMobileClueDirection(selectedDirection);
+	}, [isSmallScreen, selectedDirection]);
+
+	useEffect(() => {
+		if (!isSmallScreen || selectedCellIndex === null) {
+			return;
+		}
+
+		boardPanelRef.current?.scrollIntoView({
+			block: "start",
+			inline: "nearest",
+			behavior: "smooth",
+		});
+	}, [isSmallScreen, selectedCellIndex]);
 
 	const activeClueId = useMemo(() => {
 		if (!renderModel || selectedCellIndex === null) {
@@ -331,7 +399,7 @@ export default function CrosswordPage() {
 		() => (renderModel ? buildClueItems(renderModel, "Down") : []),
 		[renderModel],
 	);
-	const cluesStyle = cluesMaxHeight
+	const cluesStyle = !isSmallScreen && cluesMaxHeight
 		? ({
 				"--crossword-clues-height": `${cluesMaxHeight}px`,
 			} as CSSProperties)
@@ -988,7 +1056,11 @@ export default function CrosswordPage() {
 	];
 
 	return (
-		<div className="crossword-page">
+		<div
+			className={`crossword-page ${
+				isSmallScreen ? "crossword-page--mobile" : ""
+			}`}
+		>
 			<CrosswordHeader
 				puzzle={puzzleMeta}
 				currentProfile={currentProfile}
@@ -1157,10 +1229,15 @@ export default function CrosswordPage() {
 				{renderModel ? (
 					<div
 						ref={boardPanelRef}
-						className="crossword-board-panel-wrap"
+						className={`crossword-board-panel-wrap ${
+							isSmallScreen && selectedCellIndex !== null
+								? "crossword-board-panel-wrap--mobile-focused"
+								: ""
+						}`}
 					>
 						<CrosswordGrid
 							puzzle={renderModel}
+							isSmallScreen={isSmallScreen}
 							selectedCellIndex={selectedCellIndex}
 							primaryHighlightedCellIndexes={
 								primaryHighlightedCellIndexes
@@ -1204,24 +1281,64 @@ export default function CrosswordPage() {
 					</section>
 				)}
 				<section
-					className="crossword-clues"
+					className={`crossword-clues ${
+						isSmallScreen ? "crossword-clues--mobile" : ""
+					}`}
 					aria-label="Clue lists"
 					style={cluesStyle}
 				>
-					<ClueList
-						title="Across"
-						clues={acrossClues}
-						markedClueIds={markedClueIds}
-						selectedClueId={activeClueId}
-						onSelectClue={handleSelectClue}
-					/>
-					<ClueList
-						title="Down"
-						clues={downClues}
-						markedClueIds={markedClueIds}
-						selectedClueId={activeClueId}
-						onSelectClue={handleSelectClue}
-					/>
+					{isSmallScreen ? (
+						<div
+							className="crossword-clues__mobile-tabs"
+							role="tablist"
+							aria-label="Clue directions"
+						>
+							<button
+								type="button"
+								role="tab"
+								aria-selected={mobileClueDirection === "Across"}
+								className={`crossword-clues__mobile-tab ${
+									mobileClueDirection === "Across"
+										? "crossword-clues__mobile-tab--active"
+										: ""
+								}`}
+								onClick={() => setMobileClueDirection("Across")}
+							>
+								Across
+							</button>
+							<button
+								type="button"
+								role="tab"
+								aria-selected={mobileClueDirection === "Down"}
+								className={`crossword-clues__mobile-tab ${
+									mobileClueDirection === "Down"
+										? "crossword-clues__mobile-tab--active"
+										: ""
+								}`}
+								onClick={() => setMobileClueDirection("Down")}
+							>
+								Down
+							</button>
+						</div>
+					) : null}
+					{(!isSmallScreen || mobileClueDirection === "Across") && (
+						<ClueList
+							title="Across"
+							clues={acrossClues}
+							markedClueIds={markedClueIds}
+							selectedClueId={activeClueId}
+							onSelectClue={handleSelectClue}
+						/>
+					)}
+					{(!isSmallScreen || mobileClueDirection === "Down") && (
+						<ClueList
+							title="Down"
+							clues={downClues}
+							markedClueIds={markedClueIds}
+							selectedClueId={activeClueId}
+							onSelectClue={handleSelectClue}
+						/>
+					)}
 				</section>
 			</main>
 

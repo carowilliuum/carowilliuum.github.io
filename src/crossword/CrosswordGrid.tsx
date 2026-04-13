@@ -14,6 +14,7 @@ type RemoteSelection = {
 
 type CrosswordGridProps = {
 	puzzle: RenderModel;
+	isSmallScreen: boolean;
 	selectedCellIndex: number | null;
 	primaryHighlightedCellIndexes: Set<number>;
 	secondaryHighlightedCellIndexes: Set<number>;
@@ -36,6 +37,7 @@ type CrosswordGridProps = {
 
 export default function CrosswordGrid({
 	puzzle,
+	isSmallScreen,
 	selectedCellIndex,
 	primaryHighlightedCellIndexes,
 	secondaryHighlightedCellIndexes,
@@ -56,14 +58,37 @@ export default function CrosswordGrid({
 	onRequestJumpToClue,
 }: CrosswordGridProps) {
 	const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
+	const mobileInputRef = useRef<HTMLInputElement | null>(null);
+
+	const focusMobileInput = () => {
+		const input = mobileInputRef.current;
+		if (!input) {
+			return;
+		}
+
+		input.focus({ preventScroll: true });
+		const inputLength = input.value.length;
+		input.setSelectionRange(inputLength, inputLength);
+	};
+
+	const clearMobileInput = () => {
+		if (mobileInputRef.current) {
+			mobileInputRef.current.value = "";
+		}
+	};
 
 	useEffect(() => {
 		if (selectedCellIndex === null) {
 			return;
 		}
 
+		if (isSmallScreen) {
+			focusMobileInput();
+			return;
+		}
+
 		cellRefs.current[selectedCellIndex]?.focus();
-	}, [selectedCellIndex]);
+	}, [isSmallScreen, selectedCellIndex]);
 
 	return (
 		<section className="crossword-board-panel" aria-label="Game board with clue bar">
@@ -71,6 +96,112 @@ export default function CrosswordGrid({
 				<div className="crossword-clue-bar__number">{activeClueLabel}</div>
 				<div className="crossword-clue-bar__text">{activeClueText}</div>
 			</div>
+			<input
+				ref={mobileInputRef}
+				type="text"
+				className="crossword-mobile-input"
+				inputMode="text"
+				autoCapitalize="characters"
+				autoComplete="off"
+				autoCorrect="off"
+				spellCheck={false}
+				aria-label="Crossword letter input"
+				onBlur={() => {
+					clearMobileInput();
+				}}
+				onBeforeInput={(event) => {
+					if (selectedCellIndex === null) {
+						clearMobileInput();
+						return;
+					}
+
+					const nativeEvent = event.nativeEvent as InputEvent;
+					if (
+						nativeEvent.inputType === "deleteContentBackward" ||
+						nativeEvent.inputType === "deleteContentForward"
+					) {
+						event.preventDefault();
+						onDeleteGuess(selectedCellIndex);
+						clearMobileInput();
+						return;
+					}
+
+					if (!nativeEvent.inputType.startsWith("insert")) {
+						return;
+					}
+
+					const insertedText = (nativeEvent.data ?? "")
+						.replace(/[^a-z0-9]/gi, "")
+						.toUpperCase();
+					if (!insertedText) {
+						event.preventDefault();
+						clearMobileInput();
+						return;
+					}
+
+					event.preventDefault();
+					const currentValue =
+						puzzleState.guesses[String(selectedCellIndex)]?.value ?? "";
+					const isRebusCell =
+						(puzzle.cells[selectedCellIndex]?.type ?? 1) !== 1;
+					onUpdateGuess(
+						selectedCellIndex,
+						isRebusCell ? `${currentValue}${insertedText}` : insertedText,
+					);
+					clearMobileInput();
+				}}
+				onInput={() => {
+					clearMobileInput();
+				}}
+				onKeyDown={(event) => {
+					if (selectedCellIndex === null) {
+						return;
+					}
+
+					if (event.key === "Backspace" || event.key === "Delete") {
+						event.preventDefault();
+						onDeleteGuess(selectedCellIndex);
+						clearMobileInput();
+						return;
+					}
+
+					if (
+						event.key === "ArrowUp" ||
+						event.key === "ArrowDown" ||
+						event.key === "ArrowLeft" ||
+						event.key === "ArrowRight"
+					) {
+						event.preventDefault();
+						if (event.metaKey) {
+							onJumpSelection(selectedCellIndex, event.key);
+							return;
+						}
+						onMoveSelection(selectedCellIndex, event.key);
+						return;
+					}
+
+					if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
+						event.preventDefault();
+						onRequestJumpToClue();
+						return;
+					}
+
+					if (/^[a-z0-9]$/i.test(event.key)) {
+						event.preventDefault();
+						const currentValue =
+							puzzleState.guesses[String(selectedCellIndex)]?.value ?? "";
+						const isRebusCell =
+							(puzzle.cells[selectedCellIndex]?.type ?? 1) !== 1;
+						onUpdateGuess(
+							selectedCellIndex,
+							isRebusCell
+								? `${currentValue}${event.key.toUpperCase()}`
+								: event.key.toUpperCase(),
+						);
+						clearMobileInput();
+					}
+				}}
+			/>
 
 			<div
 				className="crossword-grid"
@@ -155,6 +286,14 @@ export default function CrosswordGrid({
 							aria-selected={selectedCellIndex === cellIndex}
 							tabIndex={selectedCellIndex === cellIndex ? 0 : -1}
 							onClick={() => onSelectCell(cellIndex)}
+							onPointerDown={(event) => {
+								if (!isSmallScreen) {
+									return;
+								}
+
+								event.preventDefault();
+								focusMobileInput();
+							}}
 							style={{
 								...remoteSelectionOutline,
 								"--crossword-cell-hint-overlay": `rgba(210, 50, 50, ${hintIntensity.toFixed(
