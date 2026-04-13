@@ -279,6 +279,7 @@ export function useCollaborativePuzzle() {
 	const [monthStatuses, setMonthStatuses] = useState<CalendarStatusMap>({});
 	const [error, setError] = useState<string | null>(getFirebaseConfigError());
 	const [isBusy, setIsBusy] = useState(false);
+	const [pendingGuessWriteCount, setPendingGuessWriteCount] = useState(0);
 	const [showCongrats, setShowCongrats] = useState(false);
 	const previousCompletionState = useRef<string | null>(null);
 
@@ -407,7 +408,8 @@ export function useCollaborativePuzzle() {
 			onSnapshot(
 				doc(firestore, "puzzles", activePuzzleId, "state", "current"),
 				(snapshot) => {
-					setPuzzleState(normalizeState(snapshot.data()));
+					const normalizedState = normalizeState(snapshot.data());
+					setPuzzleState(normalizedState);
 				},
 			),
 			onSnapshot(
@@ -663,7 +665,12 @@ export function useCollaborativePuzzle() {
 			},
 			{ merge: true },
 		);
-		await batch.commit();
+		setPendingGuessWriteCount((current) => current + 1);
+		try {
+			await batch.commit();
+		} finally {
+			setPendingGuessWriteCount((current) => Math.max(0, current - 1));
+		}
 	}
 
 	async function deleteGuess(cellIndex: number) {
@@ -680,6 +687,14 @@ export function useCollaborativePuzzle() {
 			selectedCellIndex === null ||
 			!user
 		) {
+			if (action === "checkSelection" && scope === "puzzle") {
+				console.log("[crossword check] skipped verification request", {
+					activePuzzleId,
+					selectedCellIndex,
+					hasFunctions: Boolean(functions),
+					hasUser: Boolean(user),
+				});
+			}
 			return;
 		}
 
@@ -687,13 +702,29 @@ export function useCollaborativePuzzle() {
 		setError(null);
 
 		try {
+			if (action === "checkSelection" && scope === "puzzle") {
+				console.log("[crossword check] requesting backend verification", {
+					puzzleId: activePuzzleId,
+					selectedCellIndex,
+					selectedDirection,
+				});
+			}
+
 			const callable = httpsCallable(functions, action);
-			await callable({
+			const result = await callable({
 				puzzleId: activePuzzleId,
 				scope,
 				anchorCellIndex: selectedCellIndex,
 				direction: selectedDirection,
 			});
+			if (action === "checkSelection" && scope === "puzzle") {
+				console.log("[crossword check] backend verification returned", {
+					puzzleId: activePuzzleId,
+					result: result.data,
+				});
+			}
+
+			return result.data;
 		} catch (caughtError) {
 			console.error(`${action} failed`, caughtError);
 			setError(
@@ -702,6 +733,7 @@ export function useCollaborativePuzzle() {
 					"Unable to update puzzle state.",
 				),
 			);
+			return null;
 		} finally {
 			setIsBusy(false);
 		}
@@ -754,6 +786,7 @@ export function useCollaborativePuzzle() {
 		monthStatuses,
 		error,
 		isBusy,
+		isSavingGuesses: pendingGuessWriteCount > 0,
 		showCongrats,
 		setShowCongrats,
 		setSelectedCellIndex,

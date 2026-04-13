@@ -22,6 +22,9 @@ type CrosswordListItem = {
 	direction: Direction;
 };
 
+const INCORRECT_HINT_RADIUS = 3;
+const INCORRECT_HINT_FADE_MS = 15_000;
+
 function formatElapsedTime(totalSeconds: number) {
 	const hours = Math.floor(totalSeconds / 3600);
 	const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -32,6 +35,31 @@ function formatElapsedTime(totalSeconds: number) {
 	).padStart(2, "0")}`;
 }
 
+function CrosswordTimer({
+	resetKey,
+	isBusy,
+}: {
+	resetKey: string;
+	isBusy: boolean;
+}) {
+	const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+	useEffect(() => {
+		setElapsedSeconds(0);
+	}, [resetKey]);
+
+	useEffect(() => {
+		const intervalId = window.setInterval(() => {
+			setElapsedSeconds((currentSeconds) => currentSeconds + 1);
+		}, 1000);
+
+		return () => {
+			window.clearInterval(intervalId);
+		};
+	}, [resetKey]);
+
+	return <span>{isBusy ? "Syncing…" : formatElapsedTime(elapsedSeconds)}</span>;
+}
 function buildClueItems(
 	puzzle: RenderModel,
 	direction: Direction,
@@ -103,6 +131,23 @@ function moveWithinClue(
 	return typeof nextCellIndex === "number" ? nextCellIndex : null;
 }
 
+function getCellCoordinates(puzzle: RenderModel, cellIndex: number) {
+	return {
+		row: Math.floor(cellIndex / puzzle.dimensions.width),
+		column: cellIndex % puzzle.dimensions.width,
+	};
+}
+
+function getManhattanDistance(
+	puzzle: RenderModel,
+	leftCellIndex: number,
+	rightCellIndex: number,
+) {
+	const left = getCellCoordinates(puzzle, leftCellIndex);
+	const right = getCellCoordinates(puzzle, rightCellIndex);
+	return Math.abs(left.row - right.row) + Math.abs(left.column - right.column);
+}
+
 export default function CrosswordPage() {
 	const {
 		authReady,
@@ -119,6 +164,7 @@ export default function CrosswordPage() {
 		monthStatuses,
 		error,
 		isBusy,
+		isSavingGuesses,
 		showCongrats,
 		setShowCongrats,
 		setSelectedCellIndex,
@@ -134,27 +180,27 @@ export default function CrosswordPage() {
 		revealSelection,
 		updateProfile,
 	} = useCollaborativePuzzle();
-	const [elapsedSeconds, setElapsedSeconds] = useState(0);
 	const [showOwnership, setShowOwnership] = useState(false);
 	const [showProfileDrawer, setShowProfileDrawer] = useState(false);
 	const [showActionMenu, setShowActionMenu] = useState(false);
+	const [showJumpPalette, setShowJumpPalette] = useState(false);
+	const [jumpClueInput, setJumpClueInput] = useState("");
+	const [jumpError, setJumpError] = useState<string | null>(null);
+	const [showIncorrectDialog, setShowIncorrectDialog] = useState(false);
+	const [verifiedIncorrectCellIndexes, setVerifiedIncorrectCellIndexes] =
+		useState<number[]>([]);
+	const [activeIncorrectHintCenterCellIndexes, setActiveIncorrectHintCenterCellIndexes] =
+		useState<number[]>([]);
+	const [incorrectHintFadeProgress, setIncorrectHintFadeProgress] = useState(1);
+	const [showUnverifiedDialog, setShowUnverifiedDialog] = useState(false);
+	const [showContributionChart, setShowContributionChart] = useState(false);
 	const [cluesMaxHeight, setCluesMaxHeight] = useState<number | null>(null);
 	const boardPanelRef = useRef<HTMLDivElement | null>(null);
-
-	useEffect(() => {
-		if (!user || !puzzleMeta) {
-			setElapsedSeconds(0);
-			return;
-		}
-
-		const intervalId = window.setInterval(() => {
-			setElapsedSeconds((currentSeconds) => currentSeconds + 1);
-		}, 1000);
-
-		return () => {
-			window.clearInterval(intervalId);
-		};
-	}, [puzzleMeta, user]);
+	const jumpInputRef = useRef<HTMLInputElement | null>(null);
+	const autoCheckedFillSignatureRef = useRef<string | null>(null);
+	const processedFillSignatureRef = useRef<string | null>(null);
+	const initializedPuzzleIdRef = useRef<string | null>(null);
+	const incorrectHintAnimationFrameRef = useRef<number | null>(null);
 
 	useEffect(() => {
 		function handleKeyDown(event: KeyboardEvent) {
@@ -194,6 +240,15 @@ export default function CrosswordPage() {
 		observer.observe(boardPanel);
 		return () => observer.disconnect();
 	}, [renderModel]);
+
+	useEffect(() => {
+		if (!showJumpPalette) {
+			return;
+		}
+
+		jumpInputRef.current?.focus();
+		jumpInputRef.current?.select();
+	}, [showJumpPalette]);
 
 	const activeClueId = useMemo(() => {
 		if (!renderModel || selectedCellIndex === null) {
@@ -301,6 +356,360 @@ export default function CrosswordPage() {
 			),
 		[profiles],
 	);
+	const playableCellIndexes = useMemo(
+		() =>
+			renderModel
+				? renderModel.cells
+						.filter((cell) => !cell.isBlock)
+						.map((cell) => cell.index)
+				: [],
+		[renderModel],
+	);
+	const puzzleFillSignature = useMemo(() => {
+		if (!renderModel) {
+			return "";
+		}
+
+		return playableCellIndexes
+			.map(
+				(cellIndex) =>
+					`${cellIndex}:${puzzleState.guesses[String(cellIndex)]?.value ?? ""}`,
+			)
+			.join("|");
+	}, [playableCellIndexes, puzzleState.guesses, renderModel]);
+	const isPuzzleFilled = useMemo(
+		() =>
+			playableCellIndexes.length > 0 &&
+			playableCellIndexes.every((cellIndex) =>
+				Boolean(puzzleState.guesses[String(cellIndex)]?.value.trim()),
+			),
+		[playableCellIndexes, puzzleState.guesses],
+	);
+	const incorrectCellIndexes = useMemo(
+		() =>
+			Object.entries(puzzleState.cellAnnotations)
+				.filter(([, annotation]) => annotation.status === "incorrect")
+				.map(([cellIndex]) => Number(cellIndex))
+				.filter((cellIndex) => !Number.isNaN(cellIndex)),
+		[puzzleState.cellAnnotations],
+	);
+	const isPuzzleFullyChecked = useMemo(
+		() =>
+			playableCellIndexes.length > 0 &&
+			playableCellIndexes.every((cellIndex) =>
+				Boolean(puzzleState.cellAnnotations[String(cellIndex)]),
+			),
+		[playableCellIndexes, puzzleState.cellAnnotations],
+	);
+	const isPuzzleCheckedCorrect = useMemo(
+		() =>
+			isPuzzleFullyChecked &&
+			playableCellIndexes.every(
+				(cellIndex) =>
+					puzzleState.cellAnnotations[String(cellIndex)]?.status === "correct",
+			),
+		[isPuzzleFullyChecked, playableCellIndexes, puzzleState.cellAnnotations],
+	);
+	const contributionBars = useMemo(() => {
+		const counts = new Map<
+			string,
+			{ label: string; color: string; count: number }
+		>();
+
+		for (const guess of Object.values(puzzleState.guesses)) {
+			if (!guess.value || !guess.guesserId) {
+				continue;
+			}
+
+			const owner = guessOwners[guess.guesserId];
+			const label = owner?.username || owner?.email || "Unknown";
+			const color = owner?.color || "#767676";
+			const current = counts.get(guess.guesserId);
+
+			if (current) {
+				current.count += 1;
+				continue;
+			}
+
+			counts.set(guess.guesserId, {
+				label,
+				color,
+				count: 1,
+			});
+		}
+
+		const total = Array.from(counts.values()).reduce(
+			(sum, entry) => sum + entry.count,
+			0,
+		);
+
+		return Array.from(counts.entries())
+			.map(([uid, entry]) => ({
+				uid,
+				...entry,
+				share: total > 0 ? (entry.count / total) * 100 : 0,
+			}))
+			.sort((left, right) => right.count - left.count);
+	}, [guessOwners, puzzleState.guesses]);
+	const firstPlayableCellGuessDebug = useMemo(
+		() =>
+			playableCellIndexes.length > 0
+				? {
+						cellIndex: playableCellIndexes[0],
+						guess:
+							puzzleState.guesses[String(playableCellIndexes[0])]?.value ?? "",
+						guessEntry:
+							puzzleState.guesses[String(playableCellIndexes[0])] ?? null,
+				  }
+				: null,
+		[playableCellIndexes, puzzleState.guesses],
+	);
+
+	useEffect(() => {
+		if (!renderModel) {
+			return;
+		}
+
+		const puzzleId = puzzleMeta?.id ?? null;
+		if (initializedPuzzleIdRef.current !== puzzleId) {
+			initializedPuzzleIdRef.current = puzzleId;
+			autoCheckedFillSignatureRef.current = null;
+			processedFillSignatureRef.current = isPuzzleFilled
+				? puzzleFillSignature
+				: null;
+			setShowIncorrectDialog(false);
+			setVerifiedIncorrectCellIndexes([]);
+			setActiveIncorrectHintCenterCellIndexes([]);
+			setIncorrectHintFadeProgress(1);
+			setShowUnverifiedDialog(false);
+			return;
+		}
+
+		if (!isPuzzleFilled) {
+			processedFillSignatureRef.current = null;
+			autoCheckedFillSignatureRef.current = null;
+			setShowIncorrectDialog(false);
+			setVerifiedIncorrectCellIndexes([]);
+			setActiveIncorrectHintCenterCellIndexes([]);
+			setIncorrectHintFadeProgress(1);
+			setShowUnverifiedDialog(false);
+			return;
+		}
+
+		if (processedFillSignatureRef.current === puzzleFillSignature) {
+			return;
+		}
+
+		if (!isPuzzleFullyChecked) {
+			if (isSavingGuesses) {
+				return;
+			}
+
+			if (autoCheckedFillSignatureRef.current === puzzleFillSignature) {
+				return;
+			}
+
+			autoCheckedFillSignatureRef.current = puzzleFillSignature;
+			console.log("[crossword check] firing puzzle-wide verification", {
+				puzzleId,
+				fillSignature: puzzleFillSignature,
+				firstPlayableCell: firstPlayableCellGuessDebug,
+			});
+			void (async () => {
+				const checkResult = (await checkSelection("puzzle")) as
+					| { incorrectCellIndexes?: number[] }
+					| null;
+				if (
+					!checkResult ||
+					autoCheckedFillSignatureRef.current !== puzzleFillSignature
+				) {
+					return;
+				}
+
+				const checkedIncorrectCellIndexes =
+					checkResult.incorrectCellIndexes ?? [];
+				const checkedIncorrectCount = checkedIncorrectCellIndexes.length;
+				const checkedAllCorrect = checkedIncorrectCount === 0;
+
+				processedFillSignatureRef.current = puzzleFillSignature;
+				console.log("[crossword check] verification result", {
+					puzzleId,
+					fillSignature: puzzleFillSignature,
+					incorrectCount: checkedIncorrectCount,
+					allCorrect: checkedAllCorrect,
+					source: "function-result",
+					firstPlayableCellGuess: firstPlayableCellGuessDebug,
+				});
+
+				if (checkedAllCorrect) {
+					setShowUnverifiedDialog(false);
+					setShowIncorrectDialog(false);
+					setVerifiedIncorrectCellIndexes([]);
+					setActiveIncorrectHintCenterCellIndexes([]);
+					setIncorrectHintFadeProgress(1);
+					setShowCongrats(true);
+					return;
+				}
+
+				setShowUnverifiedDialog(false);
+				setVerifiedIncorrectCellIndexes(checkedIncorrectCellIndexes);
+				setShowIncorrectDialog(true);
+			})();
+			return;
+		}
+
+		processedFillSignatureRef.current = puzzleFillSignature;
+		if (incorrectCellIndexes.length === 0) {
+			setShowUnverifiedDialog(false);
+			setShowIncorrectDialog(false);
+			setVerifiedIncorrectCellIndexes([]);
+			setActiveIncorrectHintCenterCellIndexes([]);
+			setIncorrectHintFadeProgress(1);
+			setShowCongrats(true);
+			return;
+		}
+
+		setShowUnverifiedDialog(false);
+		setVerifiedIncorrectCellIndexes(incorrectCellIndexes);
+		setShowIncorrectDialog(true);
+	}, [
+		checkSelection,
+		incorrectCellIndexes,
+		isPuzzleFilled,
+		isPuzzleFullyChecked,
+		isPuzzleCheckedCorrect,
+		isSavingGuesses,
+		puzzleFillSignature,
+		puzzleMeta?.id,
+		firstPlayableCellGuessDebug,
+		renderModel,
+		setShowCongrats,
+	]);
+
+	useEffect(() => {
+		if (activeIncorrectHintCenterCellIndexes.length === 0) {
+			setIncorrectHintFadeProgress(1);
+			if (incorrectHintAnimationFrameRef.current !== null) {
+				window.cancelAnimationFrame(incorrectHintAnimationFrameRef.current);
+				incorrectHintAnimationFrameRef.current = null;
+			}
+			return;
+		}
+
+		const startedAt = window.performance.now();
+
+		const tick = (now: number) => {
+			const nextProgress = Math.min(
+				(now - startedAt) / INCORRECT_HINT_FADE_MS,
+				1,
+			);
+			setIncorrectHintFadeProgress(nextProgress);
+
+			if (nextProgress >= 1) {
+				setActiveIncorrectHintCenterCellIndexes([]);
+				incorrectHintAnimationFrameRef.current = null;
+				return;
+			}
+
+			incorrectHintAnimationFrameRef.current =
+				window.requestAnimationFrame(tick);
+		};
+
+		setIncorrectHintFadeProgress(0);
+		incorrectHintAnimationFrameRef.current = window.requestAnimationFrame(tick);
+
+		return () => {
+			if (incorrectHintAnimationFrameRef.current !== null) {
+				window.cancelAnimationFrame(incorrectHintAnimationFrameRef.current);
+				incorrectHintAnimationFrameRef.current = null;
+			}
+		};
+	}, [activeIncorrectHintCenterCellIndexes]);
+
+	useEffect(() => {
+		if (!showCongrats) {
+			setShowContributionChart(false);
+		}
+	}, [showCongrats]);
+
+	const proximityHintIntensityByCellIndex = useMemo(() => {
+		if (
+			!renderModel ||
+			activeIncorrectHintCenterCellIndexes.length === 0 ||
+			incorrectHintFadeProgress >= 1
+		) {
+			return new Map<number, number>();
+		}
+
+		const fadeMultiplier = 1 - incorrectHintFadeProgress;
+		const nextEntries = new Map<number, number>();
+
+		for (const cell of renderModel.cells) {
+			if (cell.isBlock) {
+				continue;
+			}
+
+			const distances = activeIncorrectHintCenterCellIndexes.map((hintCellIndex) =>
+				getManhattanDistance(renderModel, cell.index, hintCellIndex),
+			);
+			const shortestDistance = Math.min(...distances);
+			if (shortestDistance > INCORRECT_HINT_RADIUS) {
+				continue;
+			}
+
+			const distanceWeight =
+				(INCORRECT_HINT_RADIUS + 1 - shortestDistance) /
+				(INCORRECT_HINT_RADIUS + 1);
+			nextEntries.set(cell.index, 0.4 * distanceWeight * fadeMultiplier);
+		}
+
+		return nextEntries;
+	}, [
+		activeIncorrectHintCenterCellIndexes,
+		incorrectHintFadeProgress,
+		renderModel,
+	]);
+
+	const shouldHideExactIncorrectStyling =
+		isPuzzleFilled &&
+		(verifiedIncorrectCellIndexes.length > 0 || incorrectCellIndexes.length > 0);
+
+	const handleShowIncorrectHint = () => {
+		if (!renderModel || verifiedIncorrectCellIndexes.length === 0) {
+			return;
+		}
+
+		const playableCellIndexes = renderModel.cells
+			.filter((cell) => !cell.isBlock)
+			.map((cell) => cell.index);
+		const hintCenterCellIndexes = verifiedIncorrectCellIndexes
+			.map((incorrectCellIndex) => {
+				const candidateCellIndexes = playableCellIndexes.filter((cellIndex) => {
+					const distance = getManhattanDistance(
+						renderModel,
+						cellIndex,
+						incorrectCellIndex,
+					);
+					return distance > 0 && distance <= INCORRECT_HINT_RADIUS;
+				});
+
+				if (candidateCellIndexes.length === 0) {
+					return null;
+				}
+
+				return candidateCellIndexes[
+					Math.floor(Math.random() * candidateCellIndexes.length)
+				];
+			})
+			.filter((cellIndex): cellIndex is number => cellIndex !== null);
+
+		if (hintCenterCellIndexes.length === 0) {
+			return;
+		}
+
+		setActiveIncorrectHintCenterCellIndexes(hintCenterCellIndexes);
+		setShowIncorrectDialog(false);
+	};
 
 	const handleSelectCell = (cellIndex: number) => {
 		if (!renderModel) {
@@ -340,6 +749,68 @@ export default function CrosswordPage() {
 		}
 	};
 
+	const jumpToClueLabel = (label: string) => {
+		if (!renderModel) {
+			return false;
+		}
+
+		const normalizedInput = label.trim();
+		if (!normalizedInput) {
+			return false;
+		}
+
+		const matchingClues = renderModel.clues.filter(
+			(clue) => clue.label === normalizedInput,
+		);
+		if (matchingClues.length === 0) {
+			return false;
+		}
+
+		const preferredClue =
+			matchingClues.find((clue) => clue.direction === selectedDirection) ??
+			matchingClues[0];
+		if (!preferredClue) {
+			return false;
+		}
+
+		const firstCellIndex = preferredClue.cellIndexes[0];
+		if (typeof firstCellIndex === "number") {
+			setSelectedCellIndex(firstCellIndex);
+			setSelectedDirection(preferredClue.direction);
+			return true;
+		}
+
+		return false;
+	};
+
+	const handleRequestJumpToClue = () => {
+		if (!renderModel) {
+			return;
+		}
+
+		setJumpClueInput("");
+		setJumpError(null);
+		setShowJumpPalette(true);
+	};
+
+	const handleSubmitJumpToClue = () => {
+		const normalizedInput = jumpClueInput.trim();
+		if (!normalizedInput) {
+			setJumpError("Enter a clue number to jump.");
+			return;
+		}
+
+		const didJump = jumpToClueLabel(normalizedInput);
+		if (!didJump) {
+			setJumpError(`No clue ${normalizedInput} in this puzzle.`);
+			return;
+		}
+
+		setShowJumpPalette(false);
+		setJumpClueInput("");
+		setJumpError(null);
+	};
+
 	const handleUpdateGuess = async (cellIndex: number, value: string) => {
 		if (!renderModel) {
 			return;
@@ -368,7 +839,9 @@ export default function CrosswordPage() {
 		const clueCells = renderModel.clues[clueId]?.cellIndexes ?? [];
 		const currentPosition = clueCells.indexOf(cellIndex);
 		const nextCellIndex =
-			currentPosition >= 0 ? clueCells[currentPosition + 1] : undefined;
+			currentPosition >= 0
+				? clueCells[currentPosition + 1] ?? clueCells[0]
+				: undefined;
 
 		if (typeof nextCellIndex === "number") {
 			setSelectedCellIndex(nextCellIndex);
@@ -384,8 +857,8 @@ export default function CrosswordPage() {
 
 		const currentValue = puzzleState.guesses[String(cellIndex)]?.value ?? "";
 		if (currentValue) {
-			await deleteGuess(cellIndex);
 			setSelectedCellIndex(cellIndex);
+			await deleteGuess(cellIndex);
 			return;
 		}
 
@@ -404,8 +877,8 @@ export default function CrosswordPage() {
 			currentPosition > 0 ? clueCells[currentPosition - 1] : undefined;
 
 		if (typeof previousCellIndex === "number") {
-			await deleteGuess(previousCellIndex);
 			setSelectedCellIndex(previousCellIndex);
+			await deleteGuess(previousCellIndex);
 		}
 	};
 
@@ -441,6 +914,48 @@ export default function CrosswordPage() {
 
 		if (nextCellIndex !== null) {
 			setSelectedCellIndex(nextCellIndex);
+		}
+	};
+
+	const handleJumpSelection = (cellIndex: number, key: string) => {
+		if (!renderModel) {
+			return;
+		}
+
+		const isHorizontalKey = key === "ArrowLeft" || key === "ArrowRight";
+		const targetDirection: Direction = isHorizontalKey ? "Across" : "Down";
+
+		if (selectedDirection !== targetDirection) {
+			if (
+				getCellClueIdForDirection(
+					renderModel,
+					cellIndex,
+					targetDirection,
+				) !== null
+			) {
+				setSelectedDirection(targetDirection);
+			}
+			setSelectedCellIndex(cellIndex);
+			return;
+		}
+
+		const clueId = getCellClueIdForDirection(
+			renderModel,
+			cellIndex,
+			selectedDirection,
+		);
+		if (clueId === null) {
+			return;
+		}
+
+		const clueCells = renderModel.clues[clueId]?.cellIndexes ?? [];
+		const jumpCellIndex =
+			key === "ArrowLeft" || key === "ArrowUp"
+				? clueCells[0]
+				: clueCells[clueCells.length - 1];
+
+		if (typeof jumpCellIndex === "number") {
+			setSelectedCellIndex(jumpCellIndex);
 		}
 	};
 
@@ -493,7 +1008,10 @@ export default function CrosswordPage() {
 				</div>
 
 				<div className="crossword-toolbar__timer">
-					{isBusy ? "Syncing…" : formatElapsedTime(elapsedSeconds)}
+					<CrosswordTimer
+						resetKey={puzzleMeta?.publicationDate ?? user?.uid ?? "no-puzzle"}
+						isBusy={isBusy}
+					/>
 				</div>
 
 				<div className="crossword-toolbar__actions">
@@ -538,6 +1056,103 @@ export default function CrosswordPage() {
 				</div>
 			</section>
 
+			{showJumpPalette ? (
+				<div
+					className="crossword-jump-overlay"
+					onMouseDown={(event) => {
+						if (event.target === event.currentTarget) {
+							setShowJumpPalette(false);
+							setJumpError(null);
+						}
+					}}
+				>
+					<section
+						className="crossword-jump-card"
+						aria-label="Jump to clue"
+					>
+						<div className="crossword-jump-card__eyebrow">
+							Jump To Clue
+						</div>
+						<div className="crossword-jump-card__header">
+							<h2>Find a number fast</h2>
+							<button
+								type="button"
+								className="crossword-jump-card__close"
+								aria-label="Close jump to clue"
+								onClick={() => {
+									setShowJumpPalette(false);
+									setJumpError(null);
+								}}
+							>
+								×
+							</button>
+						</div>
+						<p className="crossword-jump-card__body">
+							Type a clue number. If it exists in both directions, we’ll
+							prefer the current {selectedDirection.toLowerCase()} clue.
+						</p>
+						<form
+							className="crossword-jump-card__form"
+							onSubmit={(event) => {
+								event.preventDefault();
+								handleSubmitJumpToClue();
+							}}
+						>
+							<input
+								ref={jumpInputRef}
+								type="text"
+								inputMode="numeric"
+								pattern="[0-9]*"
+								placeholder="e.g. 17"
+								value={jumpClueInput}
+								onChange={(event) => {
+									setJumpClueInput(event.target.value.replace(/[^\d]/g, ""));
+									if (jumpError) {
+										setJumpError(null);
+									}
+								}}
+								onKeyDown={(event) => {
+									if (event.key === "Escape") {
+										event.preventDefault();
+										setShowJumpPalette(false);
+										setJumpError(null);
+									}
+								}}
+								className="crossword-jump-card__input"
+								aria-label="Clue number"
+							/>
+							<div className="crossword-jump-card__actions">
+								<button
+									type="button"
+									className="crossword-jump-card__button crossword-jump-card__button--ghost"
+									onClick={() => {
+										setShowJumpPalette(false);
+										setJumpError(null);
+									}}
+								>
+									Cancel
+								</button>
+								<button
+									type="submit"
+									className="crossword-jump-card__button crossword-jump-card__button--primary"
+								>
+									Jump
+								</button>
+							</div>
+						</form>
+						<div className="crossword-jump-card__footer">
+							<span>Shortcut</span>
+							<kbd>Cmd</kbd>
+							<span>+</span>
+							<kbd>J</kbd>
+						</div>
+						{jumpError ? (
+							<p className="crossword-jump-card__error">{jumpError}</p>
+						) : null}
+					</section>
+				</div>
+			) : null}
+
 			<main className="crossword-layout">
 				{renderModel ? (
 					<div
@@ -556,6 +1171,13 @@ export default function CrosswordPage() {
 							activeClueLabel={activeClueLabel}
 							activeClueText={activeClueText}
 							puzzleState={puzzleState}
+							verifiedIncorrectCellIndexes={
+								new Set(verifiedIncorrectCellIndexes)
+							}
+							hideIncorrectStyling={shouldHideExactIncorrectStyling}
+							proximityHintIntensityByCellIndex={
+								proximityHintIntensityByCellIndex
+							}
 							guessOwners={guessOwners}
 							remoteSelections={remoteSelections}
 							showOwnership={showOwnership}
@@ -565,6 +1187,8 @@ export default function CrosswordPage() {
 							}
 							onDeleteGuess={(cellIndex) => void handleDeleteGuess(cellIndex)}
 							onMoveSelection={handleMoveSelection}
+							onJumpSelection={handleJumpSelection}
+							onRequestJumpToClue={handleRequestJumpToClue}
 						/>
 					</div>
 				) : (
@@ -613,7 +1237,28 @@ export default function CrosswordPage() {
 			/>
 			<CongratsDialog
 				isOpen={showCongrats}
+				variant="complete"
+				contributors={contributionBars}
+				showContributionChart={showContributionChart}
+				onToggleContributionChart={() =>
+					setShowContributionChart((current) => !current)
+				}
 				onDismiss={() => setShowCongrats(false)}
+			/>
+			<CongratsDialog
+				isOpen={showIncorrectDialog}
+				variant="incorrect"
+				incorrectCount={verifiedIncorrectCellIndexes.length}
+				primaryActionLabel="Show hint"
+				onPrimaryAction={handleShowIncorrectHint}
+				onDismiss={() => {
+					setShowIncorrectDialog(false);
+				}}
+			/>
+			<CongratsDialog
+				isOpen={showUnverifiedDialog}
+				variant="unverified"
+				onDismiss={() => setShowUnverifiedDialog(false)}
 			/>
 		</div>
 	);

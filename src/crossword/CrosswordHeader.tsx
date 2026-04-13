@@ -31,7 +31,14 @@ function formatPublicationDate(publicationDate: string | undefined) {
 		return "Choose a puzzle";
 	}
 
-	const parsedDate = new Date(publicationDate);
+	const match = publicationDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	const parsedDate = match
+		? new Date(
+				Number(match[1]),
+				Number(match[2]) - 1,
+				Number(match[3]),
+		  )
+		: new Date(publicationDate);
 
 	if (Number.isNaN(parsedDate.getTime())) {
 		return publicationDate;

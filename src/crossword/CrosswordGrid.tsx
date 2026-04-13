@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 
 import type {
 	PuzzleState,
@@ -20,6 +20,9 @@ type CrosswordGridProps = {
 	activeClueLabel: string;
 	activeClueText: string;
 	puzzleState: PuzzleState;
+	verifiedIncorrectCellIndexes: Set<number>;
+	hideIncorrectStyling: boolean;
+	proximityHintIntensityByCellIndex: Map<number, number>;
 	guessOwners: Record<string, UserProfile | undefined>;
 	remoteSelections: RemoteSelection[];
 	showOwnership: boolean;
@@ -27,6 +30,8 @@ type CrosswordGridProps = {
 	onUpdateGuess: (cellIndex: number, value: string) => void;
 	onDeleteGuess: (cellIndex: number) => void;
 	onMoveSelection: (cellIndex: number, key: string) => void;
+	onJumpSelection: (cellIndex: number, key: string) => void;
+	onRequestJumpToClue: () => void;
 };
 
 export default function CrosswordGrid({
@@ -37,6 +42,9 @@ export default function CrosswordGrid({
 	activeClueLabel,
 	activeClueText,
 	puzzleState,
+	verifiedIncorrectCellIndexes,
+	hideIncorrectStyling,
+	proximityHintIntensityByCellIndex,
 	guessOwners,
 	remoteSelections,
 	showOwnership,
@@ -44,6 +52,8 @@ export default function CrosswordGrid({
 	onUpdateGuess,
 	onDeleteGuess,
 	onMoveSelection,
+	onJumpSelection,
+	onRequestJumpToClue,
 }: CrosswordGridProps) {
 	const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -92,6 +102,8 @@ export default function CrosswordGrid({
 										.join(", "),
 							  }
 							: undefined;
+					const hintIntensity =
+						proximityHintIntensityByCellIndex.get(cellIndex) ?? 0;
 					const className = [
 						"crossword-grid__cell",
 						isBlock ? "crossword-grid__cell--block" : "",
@@ -107,7 +119,12 @@ export default function CrosswordGrid({
 						annotation?.status === "correct"
 							? "crossword-grid__cell--correct"
 							: "",
+						!hideIncorrectStyling &&
 						annotation?.status === "incorrect"
+							? "crossword-grid__cell--incorrect"
+							: "",
+						!hideIncorrectStyling &&
+						verifiedIncorrectCellIndexes.has(cellIndex)
 							? "crossword-grid__cell--incorrect"
 							: "",
 						annotation?.revealed ? "crossword-grid__cell--revealed" : "",
@@ -138,7 +155,12 @@ export default function CrosswordGrid({
 							aria-selected={selectedCellIndex === cellIndex}
 							tabIndex={selectedCellIndex === cellIndex ? 0 : -1}
 							onClick={() => onSelectCell(cellIndex)}
-							style={remoteSelectionOutline}
+							style={{
+								...remoteSelectionOutline,
+								"--crossword-cell-hint-overlay": `rgba(210, 50, 50, ${hintIntensity.toFixed(
+									3,
+								)})`,
+							} as CSSProperties}
 							onKeyDown={(event) => {
 								const currentValue = guessEntry?.value ?? "";
 								const isRebusCell = (cell.type ?? 1) !== 1;
@@ -163,7 +185,17 @@ export default function CrosswordGrid({
 									event.key === "ArrowRight"
 								) {
 									event.preventDefault();
+									if (event.metaKey) {
+										onJumpSelection(cellIndex, event.key);
+										return;
+									}
 									onMoveSelection(cellIndex, event.key);
+									return;
+								}
+
+								if (event.metaKey && event.key.toLowerCase() === "j") {
+									event.preventDefault();
+									onRequestJumpToClue();
 									return;
 								}
 
