@@ -13,6 +13,7 @@ import {
 	writeBatch,
 	deleteField,
 	increment,
+	Timestamp,
 	type DocumentData,
 	type QueryDocumentSnapshot,
 } from "firebase/firestore";
@@ -31,6 +32,7 @@ import {
 	functions,
 	getFirebaseConfigError,
 } from "../firebase";
+import { formatDateKey, isFutureDateKey } from "./dateKeys";
 import type {
 	CalendarStatusMap,
 	CellAnnotation,
@@ -109,6 +111,15 @@ function normalizePuzzleMetadata(
 		  },
 ): PuzzleMetadata {
 	const data = snapshot.data() ?? {};
+	const completionState =
+		data.completionState === "complete" ? "complete" : "in_progress";
+	const rawCompletionProgress =
+		typeof data.completionProgress === "number"
+			? data.completionProgress
+			: completionState === "complete"
+			  ? 1
+			  : 0;
+
 	return {
 		id: snapshot.id,
 		publicationDate: String(data.publicationDate ?? snapshot.id),
@@ -123,8 +134,16 @@ function normalizePuzzleMetadata(
 		importedBy: data.importedBy ? String(data.importedBy) : null,
 		lastWorkedAt: snapshotDate(data.lastWorkedAt),
 		lastEditedBy: data.lastEditedBy ? String(data.lastEditedBy) : null,
-		completionState:
-			data.completionState === "complete" ? "complete" : "in_progress",
+		completionState,
+		completionProgress: Math.max(0, Math.min(1, rawCompletionProgress)),
+		filledCellCount:
+			typeof data.filledCellCount === "number"
+				? Number(data.filledCellCount)
+				: undefined,
+		totalCellCount:
+			typeof data.totalCellCount === "number"
+				? Number(data.totalCellCount)
+				: undefined,
 		completedAt: snapshotDate(data.completedAt),
 	};
 }
@@ -252,8 +271,27 @@ function getMonthRange(viewDate: Date) {
 	const end = new Date(year, month + 1, 0);
 
 	return {
-		start: start.toISOString().slice(0, 10),
-		end: end.toISOString().slice(0, 10),
+		start: formatDateKey(start),
+		end: formatDateKey(end),
+	};
+}
+
+function calculatePuzzleProgress(
+	renderModel: RenderModel,
+	puzzleState: PuzzleState,
+) {
+	const playableCells = renderModel.cells.filter((cell) => !cell.isBlock);
+	const totalCellCount = playableCells.length;
+	const filledCellCount = playableCells.filter((cell) => {
+		const value = puzzleState.guesses[String(cell.index)]?.value ?? "";
+		return value.trim().length > 0;
+	}).length;
+
+	return {
+		filledCellCount,
+		totalCellCount,
+		completionProgress:
+			totalCellCount > 0 ? filledCellCount / totalCellCount : 0,
 	};
 }
 
@@ -282,6 +320,9 @@ export function useCollaborativePuzzle() {
 	const [pendingGuessWriteCount, setPendingGuessWriteCount] = useState(0);
 	const [showCongrats, setShowCongrats] = useState(false);
 	const previousCompletionState = useRef<string | null>(null);
+	const selectedCellIndexRef = useRef<number | null>(null);
+	const selectedDirectionRef = useRef<Direction>("Across");
+	const progressBackfillIds = useRef<Set<string>>(new Set());
 
 	useEffect(() => {
 		if (!firebaseAuth) {
@@ -329,17 +370,83 @@ export function useCollaborativePuzzle() {
 		return onSnapshot(puzzleQuery, (snapshot) => {
 			const statuses = Object.fromEntries(
 				snapshot.docs.map((docSnapshot) => {
+					const data = docSnapshot.data();
 					const metadata = normalizePuzzleMetadata(docSnapshot);
 					return [
 						metadata.publicationDate,
 						{
 							completionState: metadata.completionState,
+							completionProgress: metadata.completionProgress,
+							hasStoredCompletionProgress:
+								typeof data.completionProgress === "number",
 							lastWorkedAt: metadata.lastWorkedAt,
 						},
 					];
 				}),
 			);
 			setMonthStatuses(statuses);
+
+			for (const docSnapshot of snapshot.docs) {
+				const data = docSnapshot.data();
+				if (typeof data.completionProgress === "number") {
+					continue;
+				}
+
+				const puzzleId = docSnapshot.id;
+				if (progressBackfillIds.current.has(puzzleId)) {
+					continue;
+				}
+
+				progressBackfillIds.current.add(puzzleId);
+
+				void Promise.all([
+					getDoc(doc(firestore, "puzzles", puzzleId, "content", "renderModel")),
+					getDoc(doc(firestore, "puzzles", puzzleId, "state", "current")),
+				])
+					.then(async ([renderModelSnapshot, stateSnapshot]) => {
+						const storedRenderModel = normalizeRenderModel(
+							renderModelSnapshot.data(),
+						);
+						if (!storedRenderModel) {
+							return;
+						}
+
+						const progress = calculatePuzzleProgress(
+							storedRenderModel,
+							normalizeState(stateSnapshot.data()),
+						);
+
+						await setDoc(
+							doc(firestore, "puzzles", puzzleId),
+							progress,
+							{ merge: true },
+						);
+
+						setMonthStatuses((current) => {
+							const existing = current[puzzleId];
+							if (!existing) {
+								return current;
+							}
+
+							return {
+								...current,
+								[puzzleId]: {
+									...existing,
+									...progress,
+									hasStoredCompletionProgress: true,
+								},
+							};
+						});
+					})
+					.catch((caughtError) => {
+						progressBackfillIds.current.delete(puzzleId);
+						console.warn(
+							"Unable to backfill puzzle completion progress",
+							puzzleId,
+							caughtError,
+						);
+					});
+			}
 		});
 	}, [monthViewDate, user]);
 
@@ -448,6 +555,11 @@ export function useCollaborativePuzzle() {
 	}, [profiles, user]);
 
 	useEffect(() => {
+		selectedCellIndexRef.current = selectedCellIndex;
+		selectedDirectionRef.current = selectedDirection;
+	}, [selectedCellIndex, selectedDirection]);
+
+	useEffect(() => {
 		if (!firestore || !user || !activePuzzleId || !currentProfile) {
 			return;
 		}
@@ -475,9 +587,9 @@ export function useCollaborativePuzzle() {
 							username: currentProfile.username,
 							initial: currentProfile.initial,
 							color: currentProfile.color,
-							selectedCellIndex,
-							selectedDirection,
-							lastSeenAt: serverTimestamp(),
+							selectedCellIndex: selectedCellIndexRef.current,
+							selectedDirection: selectedDirectionRef.current,
+							lastSeenAt: Timestamp.now(),
 							isViewing: true,
 						},
 					},
@@ -502,9 +614,9 @@ export function useCollaborativePuzzle() {
 							username: currentProfile.username,
 							initial: currentProfile.initial,
 							color: currentProfile.color,
-							selectedCellIndex,
-							selectedDirection,
-							lastSeenAt: serverTimestamp(),
+							selectedCellIndex: selectedCellIndexRef.current,
+							selectedDirection: selectedDirectionRef.current,
+							lastSeenAt: Timestamp.now(),
 							isViewing: false,
 						},
 					},
@@ -512,6 +624,33 @@ export function useCollaborativePuzzle() {
 				{ merge: true },
 			);
 		};
+	}, [
+		activePuzzleId,
+		currentProfile,
+		user,
+	]);
+
+	useEffect(() => {
+		if (!firestore || !user || !activePuzzleId || !currentProfile) {
+			return;
+		}
+
+		void setDoc(
+			doc(firestore, "puzzles", activePuzzleId, "presence", "current"),
+			{
+				users: {
+					[user.uid]: {
+						username: currentProfile.username,
+						initial: currentProfile.initial,
+						color: currentProfile.color,
+						selectedCellIndex,
+						selectedDirection,
+						isViewing: true,
+					},
+				},
+			},
+			{ merge: true },
+		);
 	}, [
 		activePuzzleId,
 		currentProfile,
@@ -580,6 +719,13 @@ export function useCollaborativePuzzle() {
 	async function openPuzzle(date: string) {
 		if (!firestore || !functions || !user) {
 			setError(getFirebaseConfigError());
+			return;
+		}
+
+		if (isFutureDateKey(date)) {
+			setError(
+				"The NYT does not publish future puzzles. Pick today or an earlier date.",
+			);
 			return;
 		}
 
@@ -763,11 +909,50 @@ export function useCollaborativePuzzle() {
 
 				return now - entry.lastSeenAt.getTime() <= ACTIVE_USER_WINDOW_MS;
 			})
+			.sort(([firstUid], [secondUid]) => firstUid.localeCompare(secondUid))
 			.map(([uid, entry]) => ({
 				uid,
 				...entry,
 			}));
 	}, [presence.users]);
+
+	const activePuzzleProgress = useMemo(() => {
+		if (!renderModel) {
+			return null;
+		}
+
+		const playableCells = renderModel.cells.filter((cell) => !cell.isBlock);
+		if (playableCells.length === 0) {
+			return 0;
+		}
+
+		const filledCellCount = playableCells.filter((cell) => {
+			const value = puzzleState.guesses[String(cell.index)]?.value ?? "";
+			return value.trim().length > 0;
+		}).length;
+
+		return filledCellCount / playableCells.length;
+	}, [puzzleState.guesses, renderModel]);
+
+	const visibleMonthStatuses = useMemo(() => {
+		if (!activePuzzleId || activePuzzleProgress === null) {
+			return monthStatuses;
+		}
+
+		return {
+			...monthStatuses,
+			[activePuzzleId]: {
+				completionState:
+					puzzleMeta?.completionState ??
+					monthStatuses[activePuzzleId]?.completionState ??
+					"in_progress",
+				completionProgress: activePuzzleProgress,
+				lastWorkedAt:
+					puzzleMeta?.lastWorkedAt ??
+					monthStatuses[activePuzzleId]?.lastWorkedAt,
+			},
+		};
+	}, [activePuzzleId, activePuzzleProgress, monthStatuses, puzzleMeta]);
 
 	return {
 		authReady,
@@ -783,7 +968,7 @@ export function useCollaborativePuzzle() {
 		selectedCellIndex,
 		selectedDirection,
 		monthViewDate,
-		monthStatuses,
+		monthStatuses: visibleMonthStatuses,
 		error,
 		isBusy,
 		isSavingGuesses: pendingGuessWriteCount > 0,

@@ -146,6 +146,7 @@ function normalizePuzzle(payload: NYTPuzzleResponse) {
 			cell.answer ? [[String(index), cell.answer.toUpperCase()]] : [],
 		),
 	);
+	const totalCellCount = Object.keys(answerKey).length;
 
 	return {
 		puzzleId: payload.publicationDate,
@@ -158,6 +159,9 @@ function normalizePuzzle(payload: NYTPuzzleResponse) {
 			importedAt: FieldValue.serverTimestamp(),
 			lastWorkedAt: FieldValue.serverTimestamp(),
 			completionState: "in_progress" as const,
+			completionProgress: 0,
+			filledCellCount: 0,
+			totalCellCount,
 			completedAt: null,
 		},
 		renderModel,
@@ -548,12 +552,22 @@ export const syncPuzzleCompletion = onDocumentWritten(
 				const currentGuess = state.guesses?.[index]?.value ?? "";
 				return currentGuess.toUpperCase() === answer.toUpperCase();
 			});
+		const filledCellCount = answerEntries.filter(([index]) => {
+			const currentGuess = state.guesses?.[index]?.value ?? "";
+			return currentGuess.trim().length > 0;
+		}).length;
+		const totalCellCount = answerEntries.length;
+		const completionProgress =
+			totalCellCount > 0 ? filledCellCount / totalCellCount : 0;
 
 		await db.doc(`puzzles/${puzzleId}`).set(
 			{
 				lastWorkedAt: FieldValue.serverTimestamp(),
 				lastEditedBy: state.lastEditedBy ?? null,
 				completionState: isComplete ? "complete" : "in_progress",
+				completionProgress,
+				filledCellCount,
+				totalCellCount,
 				completedAt: isComplete ? FieldValue.serverTimestamp() : null,
 			},
 			{ merge: true },
