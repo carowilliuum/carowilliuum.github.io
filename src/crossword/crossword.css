@@ -1298,14 +1298,37 @@ body {
 	align-self: stretch;
 }
 
-.crossword-grid__cell--correct .crossword-grid__letter {
-	color: var(--crossword-letter-confirmed);
-}
-
 .crossword-grid__cell--incorrect .crossword-grid__letter {
 	color: #8b1e1e;
-	text-decoration: line-through;
-	text-decoration-thickness: 3px;
+}
+
+.crossword-grid__cell--incorrect::after {
+	content: "";
+	position: absolute;
+	left: 14%;
+	right: 14%;
+	top: 58%;
+	height: 3px;
+	border-radius: 999px;
+	background: #b42318;
+	transform: rotate(-28deg);
+	transform-origin: center;
+	pointer-events: none;
+}
+
+.crossword-grid__cell--checked-correct .crossword-grid__letter {
+	animation: crossword-correct-letter-fade 3s ease-out forwards;
+}
+
+@keyframes crossword-correct-letter-fade {
+	0%,
+	68% {
+		color: var(--crossword-letter-confirmed);
+	}
+
+	100% {
+		color: var(--crossword-letter-default);
+	}
 }
 
 .crossword-grid__cell--revealed {

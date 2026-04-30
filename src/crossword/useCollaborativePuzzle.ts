@@ -687,8 +687,9 @@ export function useCollaborativePuzzle() {
 			selectedCellIndex === null ||
 			!user
 		) {
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] skipped verification request", {
+					scope,
 					activePuzzleId,
 					selectedCellIndex,
 					hasFunctions: Boolean(functions),
@@ -702,9 +703,10 @@ export function useCollaborativePuzzle() {
 		setError(null);
 
 		try {
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] requesting backend verification", {
 					puzzleId: activePuzzleId,
+					scope,
 					selectedCellIndex,
 					selectedDirection,
 				});
@@ -717,9 +719,10 @@ export function useCollaborativePuzzle() {
 				anchorCellIndex: selectedCellIndex,
 				direction: selectedDirection,
 			});
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] backend verification returned", {
 					puzzleId: activePuzzleId,
+					scope,
 					result: result.data,
 				});
 			}
