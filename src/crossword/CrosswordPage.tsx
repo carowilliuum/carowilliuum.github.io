@@ -22,9 +22,18 @@ type CrosswordListItem = {
 	direction: Direction;
 };
 
+type CheckSelectionResult = {
+	incorrectCellIndexes?: number[];
+};
+
 const INCORRECT_HINT_RADIUS = 3;
 const INCORRECT_HINT_FADE_MS = 15_000;
+const CHECK_CORRECT_FEEDBACK_MS = 3_000;
 const MOBILE_BREAKPOINT_PX = 900;
+
+function clearNumberListIfNeeded(current: number[]) {
+	return current.length > 0 ? [] : current;
+}
 
 function formatElapsedTime(totalSeconds: number) {
 	const hours = Math.floor(totalSeconds / 3600);
@@ -132,6 +141,34 @@ function moveWithinClue(
 	return typeof nextCellIndex === "number" ? nextCellIndex : null;
 }
 
+function getAffectedCellIndexes(
+	puzzle: RenderModel,
+	scope: CheckRevealScope,
+	cellIndex: number | null,
+	direction: Direction,
+) {
+	if (cellIndex === null) {
+		return [];
+	}
+
+	if (scope === "cell") {
+		return [cellIndex];
+	}
+
+	if (scope === "puzzle") {
+		return puzzle.cells
+			.filter((cell) => !cell.isBlock)
+			.map((cell) => cell.index);
+	}
+
+	const clueId = getCellClueIdForDirection(puzzle, cellIndex, direction);
+	if (clueId === null) {
+		return [cellIndex];
+	}
+
+	return puzzle.clues[clueId]?.cellIndexes ?? [cellIndex];
+}
+
 function getCellCoordinates(puzzle: RenderModel, cellIndex: number) {
 	return {
 		row: Math.floor(cellIndex / puzzle.dimensions.width),
@@ -190,6 +227,12 @@ export default function CrosswordPage() {
 	const [showIncorrectDialog, setShowIncorrectDialog] = useState(false);
 	const [verifiedIncorrectCellIndexes, setVerifiedIncorrectCellIndexes] =
 		useState<number[]>([]);
+	const [checkedCorrectCellIndexes, setCheckedCorrectCellIndexes] = useState<
+		number[]
+	>([]);
+	const [checkedIncorrectCellIndexes, setCheckedIncorrectCellIndexes] = useState<
+		number[]
+	>([]);
 	const [activeIncorrectHintCenterCellIndexes, setActiveIncorrectHintCenterCellIndexes] =
 		useState<number[]>([]);
 	const [incorrectHintFadeProgress, setIncorrectHintFadeProgress] = useState(1);
@@ -213,6 +256,7 @@ export default function CrosswordPage() {
 	const processedFillSignatureRef = useRef<string | null>(null);
 	const initializedPuzzleIdRef = useRef<string | null>(null);
 	const incorrectHintAnimationFrameRef = useRef<number | null>(null);
+	const correctFeedbackTimeoutRef = useRef<number | null>(null);
 
 	useEffect(() => {
 		if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -241,6 +285,14 @@ export default function CrosswordPage() {
 				mediaQuery.removeEventListener("change", handleChange);
 			} else if (typeof legacyMediaQuery.removeListener === "function") {
 				legacyMediaQuery.removeListener(handleChange);
+			}
+		};
+	}, []);
+
+	useEffect(() => {
+		return () => {
+			if (correctFeedbackTimeoutRef.current !== null) {
+				window.clearTimeout(correctFeedbackTimeoutRef.current);
 			}
 		};
 	}, []);
@@ -533,6 +585,68 @@ export default function CrosswordPage() {
 		[playableCellIndexes, puzzleState.guesses],
 	);
 
+	const clearCheckFeedbackForCell = (cellIndex: number) => {
+		setCheckedCorrectCellIndexes((current) =>
+			current.filter((currentCellIndex) => currentCellIndex !== cellIndex),
+		);
+		setCheckedIncorrectCellIndexes((current) =>
+			current.filter((currentCellIndex) => currentCellIndex !== cellIndex),
+		);
+		setVerifiedIncorrectCellIndexes((current) =>
+			current.filter((currentCellIndex) => currentCellIndex !== cellIndex),
+		);
+	};
+
+	const applyCheckFeedback = (
+		affectedCellIndexes: number[],
+		result: CheckSelectionResult | null | undefined,
+	) => {
+		if (!result || affectedCellIndexes.length === 0) {
+			console.log("[crossword check ui] no feedback to apply", {
+				affectedCount: affectedCellIndexes.length,
+				hasResult: Boolean(result),
+			});
+			return;
+		}
+
+		const affectedCells = new Set(affectedCellIndexes);
+		const incorrectCells = new Set(
+			(result?.incorrectCellIndexes ?? []).filter((cellIndex) =>
+				affectedCells.has(cellIndex),
+			),
+		);
+		const correctCells = affectedCellIndexes.filter(
+			(cellIndex) => !incorrectCells.has(cellIndex),
+		);
+
+		console.log("[crossword check ui] applying feedback", {
+			affectedCount: affectedCellIndexes.length,
+			correctCount: correctCells.length,
+			incorrectCount: incorrectCells.size,
+			incorrectCellIndexes: Array.from(incorrectCells),
+		});
+
+		setCheckedCorrectCellIndexes(correctCells);
+		setCheckedIncorrectCellIndexes((current) => {
+			const next = new Set(current);
+			for (const cellIndex of affectedCellIndexes) {
+				next.delete(cellIndex);
+			}
+			for (const cellIndex of Array.from(incorrectCells)) {
+				next.add(cellIndex);
+			}
+			return Array.from(next);
+		});
+
+		if (correctFeedbackTimeoutRef.current !== null) {
+			window.clearTimeout(correctFeedbackTimeoutRef.current);
+		}
+		correctFeedbackTimeoutRef.current = window.setTimeout(() => {
+			setCheckedCorrectCellIndexes(clearNumberListIfNeeded);
+			correctFeedbackTimeoutRef.current = null;
+		}, CHECK_CORRECT_FEEDBACK_MS);
+	};
+
 	useEffect(() => {
 		if (!renderModel) {
 			return;
@@ -546,8 +660,10 @@ export default function CrosswordPage() {
 				? puzzleFillSignature
 				: null;
 			setShowIncorrectDialog(false);
-			setVerifiedIncorrectCellIndexes([]);
-			setActiveIncorrectHintCenterCellIndexes([]);
+			setVerifiedIncorrectCellIndexes(clearNumberListIfNeeded);
+			setCheckedCorrectCellIndexes(clearNumberListIfNeeded);
+			setCheckedIncorrectCellIndexes(clearNumberListIfNeeded);
+			setActiveIncorrectHintCenterCellIndexes(clearNumberListIfNeeded);
 			setIncorrectHintFadeProgress(1);
 			setShowUnverifiedDialog(false);
 			return;
@@ -557,8 +673,8 @@ export default function CrosswordPage() {
 			processedFillSignatureRef.current = null;
 			autoCheckedFillSignatureRef.current = null;
 			setShowIncorrectDialog(false);
-			setVerifiedIncorrectCellIndexes([]);
-			setActiveIncorrectHintCenterCellIndexes([]);
+			setVerifiedIncorrectCellIndexes(clearNumberListIfNeeded);
+			setActiveIncorrectHintCenterCellIndexes(clearNumberListIfNeeded);
 			setIncorrectHintFadeProgress(1);
 			setShowUnverifiedDialog(false);
 			return;
@@ -610,16 +726,18 @@ export default function CrosswordPage() {
 				});
 
 				if (checkedAllCorrect) {
+					applyCheckFeedback(playableCellIndexes, checkResult);
 					setShowUnverifiedDialog(false);
 					setShowIncorrectDialog(false);
-					setVerifiedIncorrectCellIndexes([]);
-					setActiveIncorrectHintCenterCellIndexes([]);
+					setVerifiedIncorrectCellIndexes(clearNumberListIfNeeded);
+					setActiveIncorrectHintCenterCellIndexes(clearNumberListIfNeeded);
 					setIncorrectHintFadeProgress(1);
 					setShowCongrats(true);
 					return;
 				}
 
 				setShowUnverifiedDialog(false);
+				applyCheckFeedback(playableCellIndexes, checkResult);
 				setVerifiedIncorrectCellIndexes(checkedIncorrectCellIndexes);
 				setShowIncorrectDialog(true);
 			})();
@@ -630,8 +748,8 @@ export default function CrosswordPage() {
 		if (incorrectCellIndexes.length === 0) {
 			setShowUnverifiedDialog(false);
 			setShowIncorrectDialog(false);
-			setVerifiedIncorrectCellIndexes([]);
-			setActiveIncorrectHintCenterCellIndexes([]);
+			setVerifiedIncorrectCellIndexes(clearNumberListIfNeeded);
+			setActiveIncorrectHintCenterCellIndexes(clearNumberListIfNeeded);
 			setIncorrectHintFadeProgress(1);
 			setShowCongrats(true);
 			return;
@@ -647,6 +765,7 @@ export default function CrosswordPage() {
 		isPuzzleFullyChecked,
 		isPuzzleCheckedCorrect,
 		isSavingGuesses,
+		playableCellIndexes,
 		puzzleFillSignature,
 		puzzleMeta?.id,
 		firstPlayableCellGuessDebug,
@@ -779,6 +898,35 @@ export default function CrosswordPage() {
 		setShowIncorrectDialog(false);
 	};
 
+	const handleCheckSelection = async (scope: CheckRevealScope) => {
+		if (!renderModel) {
+			console.log("[crossword check ui] skipped button check: no render model", {
+				scope,
+			});
+			return;
+		}
+
+		const affectedCellIndexes = getAffectedCellIndexes(
+			renderModel,
+			scope,
+			selectedCellIndex,
+			selectedDirection,
+		);
+		console.log("[crossword check ui] button check requested", {
+			scope,
+			selectedCellIndex,
+			selectedDirection,
+			affectedCount: affectedCellIndexes.length,
+			affectedCellIndexes,
+		});
+		const result = (await checkSelection(scope)) as CheckSelectionResult | null;
+		console.log("[crossword check ui] button check returned", {
+			scope,
+			result,
+		});
+		applyCheckFeedback(affectedCellIndexes, result);
+	};
+
 	const handleSelectCell = (cellIndex: number) => {
 		if (!renderModel) {
 			return;
@@ -889,6 +1037,7 @@ export default function CrosswordPage() {
 		const nextValue = isRebusCell
 			? value.toUpperCase()
 			: value.slice(0, 1).toUpperCase();
+		clearCheckFeedbackForCell(cellIndex);
 
 		if (!nextValue) {
 			await updateGuess(cellIndex, nextValue);
@@ -925,6 +1074,7 @@ export default function CrosswordPage() {
 
 		const currentValue = puzzleState.guesses[String(cellIndex)]?.value ?? "";
 		if (currentValue) {
+			clearCheckFeedbackForCell(cellIndex);
 			setSelectedCellIndex(cellIndex);
 			await deleteGuess(cellIndex);
 			return;
@@ -945,6 +1095,7 @@ export default function CrosswordPage() {
 			currentPosition > 0 ? clueCells[currentPosition - 1] : undefined;
 
 		if (typeof previousCellIndex === "number") {
+			clearCheckFeedbackForCell(previousCellIndex);
 			setSelectedCellIndex(previousCellIndex);
 			await deleteGuess(previousCellIndex);
 		}
@@ -1112,7 +1263,7 @@ export default function CrosswordPage() {
 										onClick={() => {
 											setShowActionMenu(false);
 											if (item.action === "check") {
-												void checkSelection(item.scope);
+												void handleCheckSelection(item.scope);
 												return;
 											}
 
@@ -1250,6 +1401,12 @@ export default function CrosswordPage() {
 							puzzleState={puzzleState}
 							verifiedIncorrectCellIndexes={
 								new Set(verifiedIncorrectCellIndexes)
+							}
+							checkedCorrectCellIndexes={
+								new Set(checkedCorrectCellIndexes)
+							}
+							checkedIncorrectCellIndexes={
+								new Set(checkedIncorrectCellIndexes)
 							}
 							hideIncorrectStyling={shouldHideExactIncorrectStyling}
 							proximityHintIntensityByCellIndex={

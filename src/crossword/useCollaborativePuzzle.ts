@@ -275,6 +275,8 @@ export function useCollaborativePuzzle() {
 	);
 	const [selectedDirection, setSelectedDirection] =
 		useState<Direction>("Across");
+	const selectedCellIndexRef = useRef<number | null>(selectedCellIndex);
+	const selectedDirectionRef = useRef<Direction>(selectedDirection);
 	const [monthViewDate, setMonthViewDate] = useState(() => new Date());
 	const [monthStatuses, setMonthStatuses] = useState<CalendarStatusMap>({});
 	const [error, setError] = useState<string | null>(getFirebaseConfigError());
@@ -282,6 +284,11 @@ export function useCollaborativePuzzle() {
 	const [pendingGuessWriteCount, setPendingGuessWriteCount] = useState(0);
 	const [showCongrats, setShowCongrats] = useState(false);
 	const previousCompletionState = useRef<string | null>(null);
+
+	useEffect(() => {
+		selectedCellIndexRef.current = selectedCellIndex;
+		selectedDirectionRef.current = selectedDirection;
+	}, [selectedCellIndex, selectedDirection]);
 
 	useEffect(() => {
 		if (!firebaseAuth) {
@@ -475,8 +482,8 @@ export function useCollaborativePuzzle() {
 							username: currentProfile.username,
 							initial: currentProfile.initial,
 							color: currentProfile.color,
-							selectedCellIndex,
-							selectedDirection,
+							selectedCellIndex: selectedCellIndexRef.current,
+							selectedDirection: selectedDirectionRef.current,
 							lastSeenAt: serverTimestamp(),
 							isViewing: true,
 						},
@@ -502,8 +509,8 @@ export function useCollaborativePuzzle() {
 							username: currentProfile.username,
 							initial: currentProfile.initial,
 							color: currentProfile.color,
-							selectedCellIndex,
-							selectedDirection,
+							selectedCellIndex: selectedCellIndexRef.current,
+							selectedDirection: selectedDirectionRef.current,
 							lastSeenAt: serverTimestamp(),
 							isViewing: false,
 						},
@@ -512,6 +519,42 @@ export function useCollaborativePuzzle() {
 				{ merge: true },
 			);
 		};
+	}, [
+		activePuzzleId,
+		currentProfile,
+		user,
+	]);
+
+	useEffect(() => {
+		if (!firestore || !user || !activePuzzleId || !currentProfile) {
+			return;
+		}
+
+		const presenceRef = doc(
+			firestore,
+			"puzzles",
+			activePuzzleId,
+			"presence",
+			"current",
+		);
+
+		void setDoc(
+			presenceRef,
+			{
+				users: {
+					[user.uid]: {
+						username: currentProfile.username,
+						initial: currentProfile.initial,
+						color: currentProfile.color,
+						selectedCellIndex,
+						selectedDirection,
+						lastSeenAt: serverTimestamp(),
+						isViewing: true,
+					},
+				},
+			},
+			{ merge: true },
+		);
 	}, [
 		activePuzzleId,
 		currentProfile,
@@ -687,8 +730,9 @@ export function useCollaborativePuzzle() {
 			selectedCellIndex === null ||
 			!user
 		) {
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] skipped verification request", {
+					scope,
 					activePuzzleId,
 					selectedCellIndex,
 					hasFunctions: Boolean(functions),
@@ -702,9 +746,10 @@ export function useCollaborativePuzzle() {
 		setError(null);
 
 		try {
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] requesting backend verification", {
 					puzzleId: activePuzzleId,
+					scope,
 					selectedCellIndex,
 					selectedDirection,
 				});
@@ -717,9 +762,10 @@ export function useCollaborativePuzzle() {
 				anchorCellIndex: selectedCellIndex,
 				direction: selectedDirection,
 			});
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] backend verification returned", {
 					puzzleId: activePuzzleId,
+					scope,
 					result: result.data,
 				});
 			}
@@ -756,9 +802,13 @@ export function useCollaborativePuzzle() {
 	const activeUsers = useMemo(() => {
 		const now = Date.now();
 		return Object.entries(presence.users)
-			.filter(([, entry]) => {
-				if (!entry.isViewing || !entry.lastSeenAt) {
+			.filter(([uid, entry]) => {
+				if (!entry.isViewing) {
 					return false;
+				}
+
+				if (!entry.lastSeenAt) {
+					return uid === user?.uid;
 				}
 
 				return now - entry.lastSeenAt.getTime() <= ACTIVE_USER_WINDOW_MS;
@@ -767,7 +817,7 @@ export function useCollaborativePuzzle() {
 				uid,
 				...entry,
 			}));
-	}, [presence.users]);
+	}, [presence.users, user?.uid]);
 
 	return {
 		authReady,
