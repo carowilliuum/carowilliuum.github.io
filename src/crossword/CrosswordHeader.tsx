@@ -1,5 +1,6 @@
 import CalendarPicker from "./CalendarPicker";
 import CrosswordMonogram from "./CrosswordMonogram";
+import PixelAvatar, { getPixelAvatarName } from "./PixelAvatar";
 
 import type {
 	CalendarStatusMap,
@@ -93,7 +94,12 @@ export default function CrosswordHeader({
 				</div>
 				<div className="crossword-site-header__meta">
 					{currentProfile ? (
-						<div className="crossword-site-header__current-user">
+						<button
+							type="button"
+							className="crossword-site-header__current-user"
+							onClick={onOpenMenu}
+							aria-label="Open profile settings"
+						>
 							<span
 								className="crossword-avatar"
 								style={{ backgroundColor: currentProfile.color }}
@@ -101,7 +107,7 @@ export default function CrosswordHeader({
 								{currentProfile.initial}
 							</span>
 							<span>{currentProfile.username}</span>
-						</div>
+						</button>
 					) : null}
 				</div>
 			</header>
@@ -133,13 +139,36 @@ export default function CrosswordHeader({
 							{activeUsers.map((activeUser) => (
 								<span
 									key={activeUser.uid}
-									className="crossword-active-user-pill"
-									title={activeUser.username}
-									style={{
-										backgroundColor: activeUser.color,
-									}}
+									className="crossword-active-avatar-wrap"
 								>
-									{activeUser.username}
+									<span
+										className="crossword-active-avatar"
+										tabIndex={0}
+										aria-label={`${activeUser.username}, ${getPixelAvatarName(
+											activeUser.uid,
+										)} avatar`}
+									>
+										<PixelAvatar
+											seed={activeUser.uid}
+											label={activeUser.username}
+											color={activeUser.color}
+											className="crossword-active-avatar__sprite"
+										/>
+									</span>
+									<span className="crossword-active-avatar-preview" role="tooltip">
+										<span className="crossword-active-avatar-preview__name">
+											{activeUser.username}
+										</span>
+										<PixelAvatar
+											seed={activeUser.uid}
+											label={activeUser.username}
+											color={activeUser.color}
+											className="crossword-active-avatar-preview__sprite"
+										/>
+										<span className="crossword-active-avatar-preview__type">
+											{getPixelAvatarName(activeUser.uid)}
+										</span>
+									</span>
 								</span>
 							))}
 						</div>

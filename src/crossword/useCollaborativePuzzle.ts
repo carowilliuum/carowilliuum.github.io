@@ -13,14 +13,13 @@ import {
 	writeBatch,
 	deleteField,
 	increment,
-	Timestamp,
 	type DocumentData,
 	type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import {
 	onAuthStateChanged,
 	signInWithEmailAndPassword,
-	signOut,
+	signOut as firebaseSignOut,
 	type User,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -88,7 +87,9 @@ function snapshotDate(value: unknown) {
 	return value instanceof Date ? value : null;
 }
 
-function normalizeProfile(snapshot: QueryDocumentSnapshot<DocumentData>): UserProfile {
+function normalizeProfile(
+	snapshot: QueryDocumentSnapshot<DocumentData>,
+): UserProfile {
 	const data = snapshot.data();
 	return {
 		id: snapshot.id,
@@ -117,8 +118,8 @@ function normalizePuzzleMetadata(
 		typeof data.completionProgress === "number"
 			? data.completionProgress
 			: completionState === "complete"
-			  ? 1
-			  : 0;
+			? 1
+			: 0;
 
 	return {
 		id: snapshot.id,
@@ -148,7 +149,9 @@ function normalizePuzzleMetadata(
 	};
 }
 
-function normalizeRenderModel(data: DocumentData | undefined): RenderModel | null {
+function normalizeRenderModel(
+	data: DocumentData | undefined,
+): RenderModel | null {
 	if (!data) {
 		return null;
 	}
@@ -185,7 +188,9 @@ function normalizeRenderModel(data: DocumentData | undefined): RenderModel | nul
 		clueLists: Array.isArray(data.clueLists)
 			? data.clueLists.map((list) => ({
 					name: String(list.name ?? ""),
-					clues: Array.isArray(list.clues) ? list.clues.map(Number) : [],
+					clues: Array.isArray(list.clues)
+						? list.clues.map(Number)
+						: [],
 			  }))
 			: [],
 		source: "nyt",
@@ -210,24 +215,30 @@ function normalizeState(data: DocumentData | undefined): PuzzleState {
 	);
 
 	const cellAnnotations: Record<string, CellAnnotation> = Object.fromEntries(
-		Object.entries(data?.cellAnnotations ?? {}).map(([cellIndex, annotation]) => [
-			cellIndex,
-			{
-				status:
-					(annotation as DocumentData)?.status === "correct"
-						? "correct"
-						: "incorrect",
-				checkedAt: snapshotDate((annotation as DocumentData)?.checkedAt),
-				checkedBy: (annotation as DocumentData)?.checkedBy
-					? String((annotation as DocumentData)?.checkedBy)
-					: null,
-				revealed: Boolean((annotation as DocumentData)?.revealed),
-				revealedAt: snapshotDate((annotation as DocumentData)?.revealedAt),
-				revealedBy: (annotation as DocumentData)?.revealedBy
-					? String((annotation as DocumentData)?.revealedBy)
-					: null,
-			},
-		]),
+		Object.entries(data?.cellAnnotations ?? {}).map(
+			([cellIndex, annotation]) => [
+				cellIndex,
+				{
+					status:
+						(annotation as DocumentData)?.status === "correct"
+							? "correct"
+							: "incorrect",
+					checkedAt: snapshotDate(
+						(annotation as DocumentData)?.checkedAt,
+					),
+					checkedBy: (annotation as DocumentData)?.checkedBy
+						? String((annotation as DocumentData)?.checkedBy)
+						: null,
+					revealed: Boolean((annotation as DocumentData)?.revealed),
+					revealedAt: snapshotDate(
+						(annotation as DocumentData)?.revealedAt,
+					),
+					revealedBy: (annotation as DocumentData)?.revealedBy
+						? String((annotation as DocumentData)?.revealedBy)
+						: null,
+				},
+			],
+		),
 	);
 
 	return {
@@ -249,14 +260,17 @@ function normalizePresence(data: DocumentData | undefined): PresenceState {
 					initial: String((entry as DocumentData)?.initial ?? ""),
 					color: String((entry as DocumentData)?.color ?? "#3373D4"),
 					selectedCellIndex:
-						typeof (entry as DocumentData)?.selectedCellIndex === "number"
+						typeof (entry as DocumentData)?.selectedCellIndex ===
+						"number"
 							? Number((entry as DocumentData)?.selectedCellIndex)
 							: null,
 					selectedDirection:
 						(entry as DocumentData)?.selectedDirection === "Down"
 							? "Down"
 							: "Across",
-					lastSeenAt: snapshotDate((entry as DocumentData)?.lastSeenAt),
+					lastSeenAt: snapshotDate(
+						(entry as DocumentData)?.lastSeenAt,
+					),
 					isViewing: Boolean((entry as DocumentData)?.isViewing),
 				},
 			]),
@@ -313,6 +327,8 @@ export function useCollaborativePuzzle() {
 	);
 	const [selectedDirection, setSelectedDirection] =
 		useState<Direction>("Across");
+	const selectedCellIndexRef = useRef<number | null>(selectedCellIndex);
+	const selectedDirectionRef = useRef<Direction>(selectedDirection);
 	const [monthViewDate, setMonthViewDate] = useState(() => new Date());
 	const [monthStatuses, setMonthStatuses] = useState<CalendarStatusMap>({});
 	const [error, setError] = useState<string | null>(getFirebaseConfigError());
@@ -320,9 +336,12 @@ export function useCollaborativePuzzle() {
 	const [pendingGuessWriteCount, setPendingGuessWriteCount] = useState(0);
 	const [showCongrats, setShowCongrats] = useState(false);
 	const previousCompletionState = useRef<string | null>(null);
-	const selectedCellIndexRef = useRef<number | null>(null);
-	const selectedDirectionRef = useRef<Direction>("Across");
 	const progressBackfillIds = useRef<Set<string>>(new Set());
+
+	useEffect(() => {
+		selectedCellIndexRef.current = selectedCellIndex;
+		selectedDirectionRef.current = selectedDirection;
+	}, [selectedCellIndex, selectedDirection]);
 
 	useEffect(() => {
 		if (!firebaseAuth) {
@@ -330,7 +349,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		return onAuthStateChanged(firebaseAuth, (nextUser) => {
+		const auth = firebaseAuth;
+
+		return onAuthStateChanged(auth, (nextUser) => {
 			setUser(nextUser);
 			setAuthReady(true);
 		});
@@ -342,7 +363,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		return onSnapshot(collection(firestore, "users"), (snapshot) => {
+		const db = firestore;
+
+		return onSnapshot(collection(db, "users"), (snapshot) => {
 			const nextProfiles = Object.fromEntries(
 				snapshot.docs.map((docSnapshot) => [
 					docSnapshot.id,
@@ -359,9 +382,10 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
 		const range = getMonthRange(monthViewDate);
 		const puzzleQuery = query(
-			collection(firestore, "puzzles"),
+			collection(db, "puzzles"),
 			where("publicationDate", ">=", range.start),
 			where("publicationDate", "<=", range.end),
 			orderBy("publicationDate", "asc"),
@@ -400,8 +424,10 @@ export function useCollaborativePuzzle() {
 				progressBackfillIds.current.add(puzzleId);
 
 				void Promise.all([
-					getDoc(doc(firestore, "puzzles", puzzleId, "content", "renderModel")),
-					getDoc(doc(firestore, "puzzles", puzzleId, "state", "current")),
+					getDoc(
+						doc(db, "puzzles", puzzleId, "content", "renderModel"),
+					),
+					getDoc(doc(db, "puzzles", puzzleId, "state", "current")),
 				])
 					.then(async ([renderModelSnapshot, stateSnapshot]) => {
 						const storedRenderModel = normalizeRenderModel(
@@ -416,11 +442,9 @@ export function useCollaborativePuzzle() {
 							normalizeState(stateSnapshot.data()),
 						);
 
-						await setDoc(
-							doc(firestore, "puzzles", puzzleId),
-							progress,
-							{ merge: true },
-						);
+						await setDoc(doc(db, "puzzles", puzzleId), progress, {
+							merge: true,
+						});
 
 						setMonthStatuses((current) => {
 							const existing = current[puzzleId];
@@ -456,8 +480,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
 		const latestPuzzleQuery = query(
-			collection(firestore, "puzzles"),
+			collection(db, "puzzles"),
 			orderBy("lastWorkedAt", "desc"),
 			limit(1),
 		);
@@ -484,8 +509,10 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
+		const puzzleId = activePuzzleId;
 		const unsubscribers = [
-			onSnapshot(doc(firestore, "puzzles", activePuzzleId), (snapshot) => {
+			onSnapshot(doc(db, "puzzles", puzzleId), (snapshot) => {
 				if (!snapshot.exists()) {
 					setPuzzleMeta(null);
 					return;
@@ -507,20 +534,20 @@ export function useCollaborativePuzzle() {
 				previousCompletionState.current = metadata.completionState;
 			}),
 			onSnapshot(
-				doc(firestore, "puzzles", activePuzzleId, "content", "renderModel"),
+				doc(db, "puzzles", puzzleId, "content", "renderModel"),
 				(snapshot) => {
 					setRenderModel(normalizeRenderModel(snapshot.data()));
 				},
 			),
 			onSnapshot(
-				doc(firestore, "puzzles", activePuzzleId, "state", "current"),
+				doc(db, "puzzles", puzzleId, "state", "current"),
 				(snapshot) => {
 					const normalizedState = normalizeState(snapshot.data());
 					setPuzzleState(normalizedState);
 				},
 			),
 			onSnapshot(
-				doc(firestore, "puzzles", activePuzzleId, "presence", "current"),
+				doc(db, "puzzles", puzzleId, "presence", "current"),
 				(snapshot) => {
 					setPresence(normalizePresence(snapshot.data()));
 				},
@@ -540,7 +567,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		const firstPlayableCell = renderModel.cells.find((cell) => !cell.isBlock);
+		const firstPlayableCell = renderModel.cells.find(
+			(cell) => !cell.isBlock,
+		);
 		setSelectedCellIndex((current) =>
 			current !== null ? current : firstPlayableCell?.index ?? null,
 		);
@@ -555,22 +584,15 @@ export function useCollaborativePuzzle() {
 	}, [profiles, user]);
 
 	useEffect(() => {
-		selectedCellIndexRef.current = selectedCellIndex;
-		selectedDirectionRef.current = selectedDirection;
-	}, [selectedCellIndex, selectedDirection]);
-
-	useEffect(() => {
 		if (!firestore || !user || !activePuzzleId || !currentProfile) {
 			return;
 		}
 
-		const presenceRef = doc(
-			firestore,
-			"puzzles",
-			activePuzzleId,
-			"presence",
-			"current",
-		);
+		const db = firestore;
+		const puzzleId = activePuzzleId;
+		const profile = currentProfile;
+		const uid = user.uid;
+		const presenceRef = doc(db, "puzzles", puzzleId, "presence", "current");
 
 		let isUnmounted = false;
 
@@ -583,13 +605,13 @@ export function useCollaborativePuzzle() {
 				presenceRef,
 				{
 					users: {
-						[user.uid]: {
-							username: currentProfile.username,
-							initial: currentProfile.initial,
-							color: currentProfile.color,
+						[uid]: {
+							username: profile.username,
+							initial: profile.initial,
+							color: profile.color,
 							selectedCellIndex: selectedCellIndexRef.current,
 							selectedDirection: selectedDirectionRef.current,
-							lastSeenAt: Timestamp.now(),
+							lastSeenAt: serverTimestamp(),
 							isViewing: true,
 						},
 					},
@@ -610,13 +632,13 @@ export function useCollaborativePuzzle() {
 				presenceRef,
 				{
 					users: {
-						[user.uid]: {
-							username: currentProfile.username,
-							initial: currentProfile.initial,
-							color: currentProfile.color,
+						[uid]: {
+							username: profile.username,
+							initial: profile.initial,
+							color: profile.color,
 							selectedCellIndex: selectedCellIndexRef.current,
 							selectedDirection: selectedDirectionRef.current,
-							lastSeenAt: Timestamp.now(),
+							lastSeenAt: serverTimestamp(),
 							isViewing: false,
 						},
 					},
@@ -624,27 +646,30 @@ export function useCollaborativePuzzle() {
 				{ merge: true },
 			);
 		};
-	}, [
-		activePuzzleId,
-		currentProfile,
-		user,
-	]);
+	}, [activePuzzleId, currentProfile, user]);
 
 	useEffect(() => {
 		if (!firestore || !user || !activePuzzleId || !currentProfile) {
 			return;
 		}
 
+		const db = firestore;
+		const puzzleId = activePuzzleId;
+		const profile = currentProfile;
+		const uid = user.uid;
+		const presenceRef = doc(db, "puzzles", puzzleId, "presence", "current");
+
 		void setDoc(
-			doc(firestore, "puzzles", activePuzzleId, "presence", "current"),
+			presenceRef,
 			{
 				users: {
-					[user.uid]: {
-						username: currentProfile.username,
-						initial: currentProfile.initial,
-						color: currentProfile.color,
+					[uid]: {
+						username: profile.username,
+						initial: profile.initial,
+						color: profile.color,
 						selectedCellIndex,
 						selectedDirection,
+						lastSeenAt: serverTimestamp(),
 						isViewing: true,
 					},
 				},
@@ -665,12 +690,13 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const auth = firebaseAuth;
 		setIsBusy(true);
 		setError(null);
 
 		try {
 			await signInWithEmailAndPassword(
-				firebaseAuth,
+				auth,
 				credentials.email,
 				credentials.password,
 			);
@@ -690,11 +716,16 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const auth = firebaseAuth;
+		const firebaseFunctions = functions;
 		setIsBusy(true);
 		setError(null);
 
 		try {
-			const createAllowedAccount = httpsCallable(functions, "createAllowedAccount");
+			const createAllowedAccount = httpsCallable(
+				firebaseFunctions,
+				"createAllowedAccount",
+			);
 			await createAllowedAccount({
 				email: credentials.email,
 				password: credentials.password,
@@ -702,14 +733,17 @@ export function useCollaborativePuzzle() {
 				color: credentials.color,
 			});
 			await signInWithEmailAndPassword(
-				firebaseAuth,
+				auth,
 				credentials.email,
 				credentials.password,
 			);
 		} catch (caughtError) {
 			console.error("Create account failed", caughtError);
 			setError(
-				getReadableErrorMessage(caughtError, "Unable to create account."),
+				getReadableErrorMessage(
+					caughtError,
+					"Unable to create account.",
+				),
 			);
 		} finally {
 			setIsBusy(false);
@@ -722,6 +756,8 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
+		const firebaseFunctions = functions;
 		if (isFutureDateKey(date)) {
 			setError(
 				"The NYT does not publish future puzzles. Pick today or an earlier date.",
@@ -733,11 +769,14 @@ export function useCollaborativePuzzle() {
 		setError(null);
 
 		try {
-			const puzzleRef = doc(firestore, "puzzles", date);
+			const puzzleRef = doc(db, "puzzles", date);
 			const puzzleSnapshot = await getDoc(puzzleRef);
 
 			if (!puzzleSnapshot.exists()) {
-				const ensurePuzzle = httpsCallable(functions, "ensurePuzzle");
+				const ensurePuzzle = httpsCallable(
+					firebaseFunctions,
+					"ensurePuzzle",
+				);
 				await ensurePuzzle({ date });
 			}
 
@@ -760,9 +799,12 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		const stateRef = doc(firestore, "puzzles", activePuzzleId, "state", "current");
-		const metadataRef = doc(firestore, "puzzles", activePuzzleId);
-		const batch = writeBatch(firestore);
+		const db = firestore;
+		const puzzleId = activePuzzleId;
+		const uid = user.uid;
+		const stateRef = doc(db, "puzzles", puzzleId, "state", "current");
+		const metadataRef = doc(db, "puzzles", puzzleId);
+		const batch = writeBatch(db);
 		const guessValue = value.toUpperCase();
 
 		setPuzzleState((current) => ({
@@ -771,7 +813,7 @@ export function useCollaborativePuzzle() {
 				...current.guesses,
 				[String(cellIndex)]: {
 					value: guessValue,
-					guesserId: user.uid,
+					guesserId: uid,
 					updatedAt: new Date(),
 					origin: "manual",
 				},
@@ -789,7 +831,7 @@ export function useCollaborativePuzzle() {
 				guesses: {
 					[cellIndex]: {
 						value: guessValue,
-						guesserId: user.uid,
+						guesserId: uid,
 						updatedAt: serverTimestamp(),
 						origin: "manual",
 					},
@@ -798,7 +840,7 @@ export function useCollaborativePuzzle() {
 					[cellIndex]: deleteField(),
 				},
 				updatedAt: serverTimestamp(),
-				lastEditedBy: user.uid,
+				lastEditedBy: uid,
 				revision: increment(1),
 			},
 			{ merge: true },
@@ -807,7 +849,7 @@ export function useCollaborativePuzzle() {
 			metadataRef,
 			{
 				lastWorkedAt: serverTimestamp(),
-				lastEditedBy: user.uid,
+				lastEditedBy: uid,
 			},
 			{ merge: true },
 		);
@@ -833,8 +875,9 @@ export function useCollaborativePuzzle() {
 			selectedCellIndex === null ||
 			!user
 		) {
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] skipped verification request", {
+					scope,
 					activePuzzleId,
 					selectedCellIndex,
 					hasFunctions: Boolean(functions),
@@ -848,12 +891,16 @@ export function useCollaborativePuzzle() {
 		setError(null);
 
 		try {
-			if (action === "checkSelection" && scope === "puzzle") {
-				console.log("[crossword check] requesting backend verification", {
-					puzzleId: activePuzzleId,
-					selectedCellIndex,
-					selectedDirection,
-				});
+			if (action === "checkSelection") {
+				console.log(
+					"[crossword check] requesting backend verification",
+					{
+						puzzleId: activePuzzleId,
+						scope,
+						selectedCellIndex,
+						selectedDirection,
+					},
+				);
 			}
 
 			const callable = httpsCallable(functions, action);
@@ -863,9 +910,10 @@ export function useCollaborativePuzzle() {
 				anchorCellIndex: selectedCellIndex,
 				direction: selectedDirection,
 			});
-			if (action === "checkSelection" && scope === "puzzle") {
+			if (action === "checkSelection") {
 				console.log("[crossword check] backend verification returned", {
 					puzzleId: activePuzzleId,
+					scope,
 					result: result.data,
 				});
 			}
@@ -890,7 +938,10 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		await updateDoc(doc(firestore, "users", user.uid), {
+		const db = firestore;
+		const uid = user.uid;
+
+		await updateDoc(doc(db, "users", uid), {
 			username: input.username.trim(),
 			initial: input.username.trim().slice(0, 1).toUpperCase(),
 			color: input.color.trim(),
@@ -899,22 +950,40 @@ export function useCollaborativePuzzle() {
 		});
 	}
 
+	async function handleSignOut() {
+		if (!firebaseAuth) {
+			setError(getFirebaseConfigError());
+			return;
+		}
+
+		const auth = firebaseAuth;
+		await firebaseSignOut(auth);
+	}
+
 	const activeUsers = useMemo(() => {
 		const now = Date.now();
 		return Object.entries(presence.users)
-			.filter(([, entry]) => {
-				if (!entry.isViewing || !entry.lastSeenAt) {
+			.filter(([uid, entry]) => {
+				if (!entry.isViewing) {
 					return false;
 				}
 
-				return now - entry.lastSeenAt.getTime() <= ACTIVE_USER_WINDOW_MS;
+				if (!entry.lastSeenAt) {
+					return uid === user?.uid;
+				}
+
+				return (
+					now - entry.lastSeenAt.getTime() <= ACTIVE_USER_WINDOW_MS
+				);
 			})
-			.sort(([firstUid], [secondUid]) => firstUid.localeCompare(secondUid))
+			.sort(([firstUid], [secondUid]) =>
+				firstUid.localeCompare(secondUid),
+			)
 			.map(([uid, entry]) => ({
 				uid,
 				...entry,
 			}));
-	}, [presence.users]);
+	}, [presence.users, user?.uid]);
 
 	const activePuzzleProgress = useMemo(() => {
 		if (!renderModel) {
@@ -979,7 +1048,7 @@ export function useCollaborativePuzzle() {
 		setMonthViewDate,
 		signIn,
 		createAccount,
-		signOut: firebaseAuth ? () => signOut(firebaseAuth) : async () => {},
+		signOut: handleSignOut,
 		openPuzzle,
 		updateGuess,
 		deleteGuess,

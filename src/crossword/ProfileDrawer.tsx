@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import PixelAvatar, { getPixelAvatarName } from "./PixelAvatar";
 import type { UserProfile } from "./firebaseTypes";
 
 type ProfileDrawerProps = {
@@ -10,7 +11,7 @@ type ProfileDrawerProps = {
 	onSignOut: () => Promise<void>;
 };
 
-const PROFILE_COLORS = ["#46F26C", "#3373D4", "#F25E46", "#E4A02C", "#8B5CF6"];
+const DEFAULT_PROFILE_COLOR = "#46F26C";
 
 export default function ProfileDrawer({
 	isOpen,
@@ -20,11 +21,11 @@ export default function ProfileDrawer({
 	onSignOut,
 }: ProfileDrawerProps) {
 	const [username, setUsername] = useState(profile?.username ?? "");
-	const [color, setColor] = useState(profile?.color ?? PROFILE_COLORS[0]);
+	const [color, setColor] = useState(profile?.color ?? DEFAULT_PROFILE_COLOR);
 
 	useEffect(() => {
 		setUsername(profile?.username ?? "");
-		setColor(profile?.color ?? PROFILE_COLORS[0]);
+		setColor(profile?.color ?? DEFAULT_PROFILE_COLOR);
 	}, [profile]);
 
 	if (!isOpen) {
@@ -44,6 +45,24 @@ export default function ProfileDrawer({
 					</button>
 				</div>
 				<div className="crossword-profile-drawer__content">
+					{profile ? (
+						<div className="crossword-profile-avatar-preview">
+							<PixelAvatar
+								seed={profile.id}
+								label={username || profile.username}
+								color={color}
+								className="crossword-profile-avatar-preview__sprite"
+							/>
+							<div>
+								<span className="crossword-profile-avatar-preview__label">
+									Avatar
+								</span>
+								<span className="crossword-profile-avatar-preview__name">
+									{getPixelAvatarName(profile.id)}
+								</span>
+							</div>
+						</div>
+					) : null}
 					<label className="crossword-auth-form__field">
 						<span>Username</span>
 						<input
@@ -52,24 +71,18 @@ export default function ProfileDrawer({
 							onChange={(event) => setUsername(event.target.value)}
 						/>
 					</label>
-					<div className="crossword-auth-form__field">
+					<label className="crossword-auth-form__field">
 						<span>Color</span>
-						<div className="crossword-color-picker">
-							{PROFILE_COLORS.map((entry) => (
-								<button
-									key={entry}
-									type="button"
-									className={
-										color === entry
-											? "crossword-color-picker__swatch crossword-color-picker__swatch--selected"
-											: "crossword-color-picker__swatch"
-									}
-									style={{ backgroundColor: entry }}
-									onClick={() => setColor(entry)}
-								/>
-							))}
+						<div className="crossword-color-wheel">
+							<input
+								type="color"
+								value={color}
+								onChange={(event) => setColor(event.target.value)}
+								aria-label="Choose profile color"
+							/>
+							<span>{color.toUpperCase()}</span>
 						</div>
-					</div>
+					</label>
 					<button
 						type="button"
 						className="crossword-auth-form__submit"

@@ -23,6 +23,8 @@ type CrosswordGridProps = {
 	activeClueText: string;
 	puzzleState: PuzzleState;
 	verifiedIncorrectCellIndexes: Set<number>;
+	checkedCorrectCellIndexes: Set<number>;
+	checkedIncorrectCellIndexes: Set<number>;
 	hideIncorrectStyling: boolean;
 	proximityHintIntensityByCellIndex: Map<number, number>;
 	guessOwners: Record<string, UserProfile | undefined>;
@@ -47,6 +49,8 @@ export default function CrosswordGrid({
 	activeClueText,
 	puzzleState,
 	verifiedIncorrectCellIndexes,
+	checkedCorrectCellIndexes,
+	checkedIncorrectCellIndexes,
 	hideIncorrectStyling,
 	proximityHintIntensityByCellIndex,
 	guessOwners,
@@ -255,8 +259,11 @@ export default function CrosswordGrid({
 						selectedCellIndex === cellIndex
 							? "crossword-grid__cell--selected"
 							: "",
-						annotation?.status === "correct"
-							? "crossword-grid__cell--correct"
+						checkedCorrectCellIndexes.has(cellIndex)
+							? "crossword-grid__cell--checked-correct"
+							: "",
+						checkedIncorrectCellIndexes.has(cellIndex)
+							? "crossword-grid__cell--incorrect"
 							: "",
 						!hideIncorrectStyling &&
 						annotation?.status === "incorrect"
