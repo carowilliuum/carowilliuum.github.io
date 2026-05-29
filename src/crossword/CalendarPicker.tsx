@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 
+import { formatDateKey, getTodayDateKey } from "./dateKeys";
 import type { CalendarStatusMap } from "./firebaseTypes";
 
 type CalendarPickerProps = {
@@ -17,8 +18,8 @@ function startOfCalendarMonth(viewDate: Date) {
 	return first;
 }
 
-function formatDateKey(date: Date) {
-	return date.toISOString().slice(0, 10);
+function clampProgress(value: number) {
+	return Math.max(0, Math.min(1, value));
 }
 
 export default function CalendarPicker({
@@ -29,6 +30,15 @@ export default function CalendarPicker({
 	onSelectDate,
 }: CalendarPickerProps) {
 	const [isOpen, setIsOpen] = useState(false);
+	const today = new Date();
+	const todayKey = getTodayDateKey();
+	const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+	const viewMonthStart = new Date(
+		monthViewDate.getFullYear(),
+		monthViewDate.getMonth(),
+		1,
+	);
+	const canGoNext = viewMonthStart.getTime() < currentMonthStart.getTime();
 	const days = useMemo(() => {
 		const start = startOfCalendarMonth(monthViewDate);
 		return Array.from({ length: 42 }, (_, index) => {
@@ -77,15 +87,21 @@ export default function CalendarPicker({
 						</strong>
 						<button
 							type="button"
-							onClick={() =>
+							disabled={!canGoNext}
+							aria-label="Next month"
+							onClick={() => {
+								if (!canGoNext) {
+									return;
+								}
+
 								onMonthChange(
 									new Date(
 										monthViewDate.getFullYear(),
 										monthViewDate.getMonth() + 1,
 										1,
 									),
-								)
-							}
+								);
+							}}
 						>
 							›
 						</button>
@@ -102,6 +118,17 @@ export default function CalendarPicker({
 							const isCurrentMonth =
 								date.getMonth() === monthViewDate.getMonth();
 							const isSelected = value === dateKey;
+							const isToday = dateKey === todayKey;
+							const isFuture = dateKey > todayKey;
+							const progress =
+								status?.completionState === "complete"
+									? 1
+									: clampProgress(status?.completionProgress ?? 0);
+							const dayStyle = status
+								? ({
+										"--crossword-calendar-day-progress": `${progress * 100}%`,
+								  } as CSSProperties)
+								: undefined;
 
 							return (
 								<button
@@ -113,6 +140,9 @@ export default function CalendarPicker({
 											? "crossword-calendar__day--current-month"
 											: "",
 										isSelected ? "crossword-calendar__day--selected" : "",
+										isToday ? "crossword-calendar__day--today" : "",
+										isFuture ? "crossword-calendar__day--future" : "",
+										status ? "crossword-calendar__day--has-status" : "",
 										status?.completionState === "complete"
 											? "crossword-calendar__day--complete"
 											: "",
@@ -122,7 +152,13 @@ export default function CalendarPicker({
 									]
 										.filter(Boolean)
 										.join(" ")}
+									disabled={isFuture}
+									style={dayStyle}
 									onClick={() => {
+										if (isFuture) {
+											return;
+										}
+
 										onSelectDate(dateKey);
 										setIsOpen(false);
 									}}

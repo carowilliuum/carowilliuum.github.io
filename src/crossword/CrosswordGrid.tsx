@@ -15,6 +15,7 @@ type RemoteSelection = {
 type CrosswordGridProps = {
 	puzzle: RenderModel;
 	isSmallScreen: boolean;
+	showClueBar: boolean;
 	selectedCellIndex: number | null;
 	primaryHighlightedCellIndexes: Set<number>;
 	secondaryHighlightedCellIndexes: Set<number>;
@@ -40,6 +41,7 @@ type CrosswordGridProps = {
 export default function CrosswordGrid({
 	puzzle,
 	isSmallScreen,
+	showClueBar,
 	selectedCellIndex,
 	primaryHighlightedCellIndexes,
 	secondaryHighlightedCellIndexes,
@@ -95,11 +97,16 @@ export default function CrosswordGrid({
 	}, [isSmallScreen, selectedCellIndex]);
 
 	return (
-		<section className="crossword-board-panel" aria-label="Game board with clue bar">
-			<div className="crossword-clue-bar">
-				<div className="crossword-clue-bar__number">{activeClueLabel}</div>
-				<div className="crossword-clue-bar__text">{activeClueText}</div>
-			</div>
+		<section
+			className="crossword-board-panel"
+			aria-label={showClueBar ? "Game board with clue bar" : "Game board"}
+		>
+			{showClueBar ? (
+				<div className="crossword-clue-bar">
+					<div className="crossword-clue-bar__number">{activeClueLabel}</div>
+					<div className="crossword-clue-bar__text">{activeClueText}</div>
+				</div>
+			) : null}
 			<input
 				ref={mobileInputRef}
 				type="text"
@@ -213,7 +220,8 @@ export default function CrosswordGrid({
 				aria-label="Crossword puzzle grid"
 				style={{
 					gridTemplateColumns: `repeat(${puzzle.dimensions.width}, 1fr)`,
-				}}
+					"--crossword-grid-columns": puzzle.dimensions.width,
+				} as CSSProperties}
 			>
 				{puzzle.cells.map((cell) => {
 					const cellIndex = cell.index;

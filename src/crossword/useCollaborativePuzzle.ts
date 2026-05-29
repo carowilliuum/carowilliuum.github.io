@@ -19,7 +19,7 @@ import {
 import {
 	onAuthStateChanged,
 	signInWithEmailAndPassword,
-	signOut,
+	signOut as firebaseSignOut,
 	type User,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -31,6 +31,7 @@ import {
 	functions,
 	getFirebaseConfigError,
 } from "../firebase";
+import { formatDateKey, isFutureDateKey } from "./dateKeys";
 import type {
 	CalendarStatusMap,
 	CellAnnotation,
@@ -86,7 +87,9 @@ function snapshotDate(value: unknown) {
 	return value instanceof Date ? value : null;
 }
 
-function normalizeProfile(snapshot: QueryDocumentSnapshot<DocumentData>): UserProfile {
+function normalizeProfile(
+	snapshot: QueryDocumentSnapshot<DocumentData>,
+): UserProfile {
 	const data = snapshot.data();
 	return {
 		id: snapshot.id,
@@ -109,6 +112,15 @@ function normalizePuzzleMetadata(
 		  },
 ): PuzzleMetadata {
 	const data = snapshot.data() ?? {};
+	const completionState =
+		data.completionState === "complete" ? "complete" : "in_progress";
+	const rawCompletionProgress =
+		typeof data.completionProgress === "number"
+			? data.completionProgress
+			: completionState === "complete"
+			? 1
+			: 0;
+
 	return {
 		id: snapshot.id,
 		publicationDate: String(data.publicationDate ?? snapshot.id),
@@ -123,13 +135,23 @@ function normalizePuzzleMetadata(
 		importedBy: data.importedBy ? String(data.importedBy) : null,
 		lastWorkedAt: snapshotDate(data.lastWorkedAt),
 		lastEditedBy: data.lastEditedBy ? String(data.lastEditedBy) : null,
-		completionState:
-			data.completionState === "complete" ? "complete" : "in_progress",
+		completionState,
+		completionProgress: Math.max(0, Math.min(1, rawCompletionProgress)),
+		filledCellCount:
+			typeof data.filledCellCount === "number"
+				? Number(data.filledCellCount)
+				: undefined,
+		totalCellCount:
+			typeof data.totalCellCount === "number"
+				? Number(data.totalCellCount)
+				: undefined,
 		completedAt: snapshotDate(data.completedAt),
 	};
 }
 
-function normalizeRenderModel(data: DocumentData | undefined): RenderModel | null {
+function normalizeRenderModel(
+	data: DocumentData | undefined,
+): RenderModel | null {
 	if (!data) {
 		return null;
 	}
@@ -166,7 +188,9 @@ function normalizeRenderModel(data: DocumentData | undefined): RenderModel | nul
 		clueLists: Array.isArray(data.clueLists)
 			? data.clueLists.map((list) => ({
 					name: String(list.name ?? ""),
-					clues: Array.isArray(list.clues) ? list.clues.map(Number) : [],
+					clues: Array.isArray(list.clues)
+						? list.clues.map(Number)
+						: [],
 			  }))
 			: [],
 		source: "nyt",
@@ -191,24 +215,30 @@ function normalizeState(data: DocumentData | undefined): PuzzleState {
 	);
 
 	const cellAnnotations: Record<string, CellAnnotation> = Object.fromEntries(
-		Object.entries(data?.cellAnnotations ?? {}).map(([cellIndex, annotation]) => [
-			cellIndex,
-			{
-				status:
-					(annotation as DocumentData)?.status === "correct"
-						? "correct"
-						: "incorrect",
-				checkedAt: snapshotDate((annotation as DocumentData)?.checkedAt),
-				checkedBy: (annotation as DocumentData)?.checkedBy
-					? String((annotation as DocumentData)?.checkedBy)
-					: null,
-				revealed: Boolean((annotation as DocumentData)?.revealed),
-				revealedAt: snapshotDate((annotation as DocumentData)?.revealedAt),
-				revealedBy: (annotation as DocumentData)?.revealedBy
-					? String((annotation as DocumentData)?.revealedBy)
-					: null,
-			},
-		]),
+		Object.entries(data?.cellAnnotations ?? {}).map(
+			([cellIndex, annotation]) => [
+				cellIndex,
+				{
+					status:
+						(annotation as DocumentData)?.status === "correct"
+							? "correct"
+							: "incorrect",
+					checkedAt: snapshotDate(
+						(annotation as DocumentData)?.checkedAt,
+					),
+					checkedBy: (annotation as DocumentData)?.checkedBy
+						? String((annotation as DocumentData)?.checkedBy)
+						: null,
+					revealed: Boolean((annotation as DocumentData)?.revealed),
+					revealedAt: snapshotDate(
+						(annotation as DocumentData)?.revealedAt,
+					),
+					revealedBy: (annotation as DocumentData)?.revealedBy
+						? String((annotation as DocumentData)?.revealedBy)
+						: null,
+				},
+			],
+		),
 	);
 
 	return {
@@ -230,14 +260,17 @@ function normalizePresence(data: DocumentData | undefined): PresenceState {
 					initial: String((entry as DocumentData)?.initial ?? ""),
 					color: String((entry as DocumentData)?.color ?? "#3373D4"),
 					selectedCellIndex:
-						typeof (entry as DocumentData)?.selectedCellIndex === "number"
+						typeof (entry as DocumentData)?.selectedCellIndex ===
+						"number"
 							? Number((entry as DocumentData)?.selectedCellIndex)
 							: null,
 					selectedDirection:
 						(entry as DocumentData)?.selectedDirection === "Down"
 							? "Down"
 							: "Across",
-					lastSeenAt: snapshotDate((entry as DocumentData)?.lastSeenAt),
+					lastSeenAt: snapshotDate(
+						(entry as DocumentData)?.lastSeenAt,
+					),
 					isViewing: Boolean((entry as DocumentData)?.isViewing),
 				},
 			]),
@@ -252,8 +285,27 @@ function getMonthRange(viewDate: Date) {
 	const end = new Date(year, month + 1, 0);
 
 	return {
-		start: start.toISOString().slice(0, 10),
-		end: end.toISOString().slice(0, 10),
+		start: formatDateKey(start),
+		end: formatDateKey(end),
+	};
+}
+
+function calculatePuzzleProgress(
+	renderModel: RenderModel,
+	puzzleState: PuzzleState,
+) {
+	const playableCells = renderModel.cells.filter((cell) => !cell.isBlock);
+	const totalCellCount = playableCells.length;
+	const filledCellCount = playableCells.filter((cell) => {
+		const value = puzzleState.guesses[String(cell.index)]?.value ?? "";
+		return value.trim().length > 0;
+	}).length;
+
+	return {
+		filledCellCount,
+		totalCellCount,
+		completionProgress:
+			totalCellCount > 0 ? filledCellCount / totalCellCount : 0,
 	};
 }
 
@@ -284,6 +336,7 @@ export function useCollaborativePuzzle() {
 	const [pendingGuessWriteCount, setPendingGuessWriteCount] = useState(0);
 	const [showCongrats, setShowCongrats] = useState(false);
 	const previousCompletionState = useRef<string | null>(null);
+	const progressBackfillIds = useRef<Set<string>>(new Set());
 
 	useEffect(() => {
 		selectedCellIndexRef.current = selectedCellIndex;
@@ -296,7 +349,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		return onAuthStateChanged(firebaseAuth, (nextUser) => {
+		const auth = firebaseAuth;
+
+		return onAuthStateChanged(auth, (nextUser) => {
 			setUser(nextUser);
 			setAuthReady(true);
 		});
@@ -308,7 +363,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		return onSnapshot(collection(firestore, "users"), (snapshot) => {
+		const db = firestore;
+
+		return onSnapshot(collection(db, "users"), (snapshot) => {
 			const nextProfiles = Object.fromEntries(
 				snapshot.docs.map((docSnapshot) => [
 					docSnapshot.id,
@@ -325,9 +382,10 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
 		const range = getMonthRange(monthViewDate);
 		const puzzleQuery = query(
-			collection(firestore, "puzzles"),
+			collection(db, "puzzles"),
 			where("publicationDate", ">=", range.start),
 			where("publicationDate", "<=", range.end),
 			orderBy("publicationDate", "asc"),
@@ -336,17 +394,83 @@ export function useCollaborativePuzzle() {
 		return onSnapshot(puzzleQuery, (snapshot) => {
 			const statuses = Object.fromEntries(
 				snapshot.docs.map((docSnapshot) => {
+					const data = docSnapshot.data();
 					const metadata = normalizePuzzleMetadata(docSnapshot);
 					return [
 						metadata.publicationDate,
 						{
 							completionState: metadata.completionState,
+							completionProgress: metadata.completionProgress,
+							hasStoredCompletionProgress:
+								typeof data.completionProgress === "number",
 							lastWorkedAt: metadata.lastWorkedAt,
 						},
 					];
 				}),
 			);
 			setMonthStatuses(statuses);
+
+			for (const docSnapshot of snapshot.docs) {
+				const data = docSnapshot.data();
+				if (typeof data.completionProgress === "number") {
+					continue;
+				}
+
+				const puzzleId = docSnapshot.id;
+				if (progressBackfillIds.current.has(puzzleId)) {
+					continue;
+				}
+
+				progressBackfillIds.current.add(puzzleId);
+
+				void Promise.all([
+					getDoc(
+						doc(db, "puzzles", puzzleId, "content", "renderModel"),
+					),
+					getDoc(doc(db, "puzzles", puzzleId, "state", "current")),
+				])
+					.then(async ([renderModelSnapshot, stateSnapshot]) => {
+						const storedRenderModel = normalizeRenderModel(
+							renderModelSnapshot.data(),
+						);
+						if (!storedRenderModel) {
+							return;
+						}
+
+						const progress = calculatePuzzleProgress(
+							storedRenderModel,
+							normalizeState(stateSnapshot.data()),
+						);
+
+						await setDoc(doc(db, "puzzles", puzzleId), progress, {
+							merge: true,
+						});
+
+						setMonthStatuses((current) => {
+							const existing = current[puzzleId];
+							if (!existing) {
+								return current;
+							}
+
+							return {
+								...current,
+								[puzzleId]: {
+									...existing,
+									...progress,
+									hasStoredCompletionProgress: true,
+								},
+							};
+						});
+					})
+					.catch((caughtError) => {
+						progressBackfillIds.current.delete(puzzleId);
+						console.warn(
+							"Unable to backfill puzzle completion progress",
+							puzzleId,
+							caughtError,
+						);
+					});
+			}
 		});
 	}, [monthViewDate, user]);
 
@@ -356,8 +480,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
 		const latestPuzzleQuery = query(
-			collection(firestore, "puzzles"),
+			collection(db, "puzzles"),
 			orderBy("lastWorkedAt", "desc"),
 			limit(1),
 		);
@@ -384,8 +509,10 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
+		const puzzleId = activePuzzleId;
 		const unsubscribers = [
-			onSnapshot(doc(firestore, "puzzles", activePuzzleId), (snapshot) => {
+			onSnapshot(doc(db, "puzzles", puzzleId), (snapshot) => {
 				if (!snapshot.exists()) {
 					setPuzzleMeta(null);
 					return;
@@ -407,20 +534,20 @@ export function useCollaborativePuzzle() {
 				previousCompletionState.current = metadata.completionState;
 			}),
 			onSnapshot(
-				doc(firestore, "puzzles", activePuzzleId, "content", "renderModel"),
+				doc(db, "puzzles", puzzleId, "content", "renderModel"),
 				(snapshot) => {
 					setRenderModel(normalizeRenderModel(snapshot.data()));
 				},
 			),
 			onSnapshot(
-				doc(firestore, "puzzles", activePuzzleId, "state", "current"),
+				doc(db, "puzzles", puzzleId, "state", "current"),
 				(snapshot) => {
 					const normalizedState = normalizeState(snapshot.data());
 					setPuzzleState(normalizedState);
 				},
 			),
 			onSnapshot(
-				doc(firestore, "puzzles", activePuzzleId, "presence", "current"),
+				doc(db, "puzzles", puzzleId, "presence", "current"),
 				(snapshot) => {
 					setPresence(normalizePresence(snapshot.data()));
 				},
@@ -440,7 +567,9 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		const firstPlayableCell = renderModel.cells.find((cell) => !cell.isBlock);
+		const firstPlayableCell = renderModel.cells.find(
+			(cell) => !cell.isBlock,
+		);
 		setSelectedCellIndex((current) =>
 			current !== null ? current : firstPlayableCell?.index ?? null,
 		);
@@ -459,13 +588,11 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		const presenceRef = doc(
-			firestore,
-			"puzzles",
-			activePuzzleId,
-			"presence",
-			"current",
-		);
+		const db = firestore;
+		const puzzleId = activePuzzleId;
+		const profile = currentProfile;
+		const uid = user.uid;
+		const presenceRef = doc(db, "puzzles", puzzleId, "presence", "current");
 
 		let isUnmounted = false;
 
@@ -478,10 +605,10 @@ export function useCollaborativePuzzle() {
 				presenceRef,
 				{
 					users: {
-						[user.uid]: {
-							username: currentProfile.username,
-							initial: currentProfile.initial,
-							color: currentProfile.color,
+						[uid]: {
+							username: profile.username,
+							initial: profile.initial,
+							color: profile.color,
 							selectedCellIndex: selectedCellIndexRef.current,
 							selectedDirection: selectedDirectionRef.current,
 							lastSeenAt: serverTimestamp(),
@@ -505,10 +632,10 @@ export function useCollaborativePuzzle() {
 				presenceRef,
 				{
 					users: {
-						[user.uid]: {
-							username: currentProfile.username,
-							initial: currentProfile.initial,
-							color: currentProfile.color,
+						[uid]: {
+							username: profile.username,
+							initial: profile.initial,
+							color: profile.color,
 							selectedCellIndex: selectedCellIndexRef.current,
 							selectedDirection: selectedDirectionRef.current,
 							lastSeenAt: serverTimestamp(),
@@ -519,33 +646,27 @@ export function useCollaborativePuzzle() {
 				{ merge: true },
 			);
 		};
-	}, [
-		activePuzzleId,
-		currentProfile,
-		user,
-	]);
+	}, [activePuzzleId, currentProfile, user]);
 
 	useEffect(() => {
 		if (!firestore || !user || !activePuzzleId || !currentProfile) {
 			return;
 		}
 
-		const presenceRef = doc(
-			firestore,
-			"puzzles",
-			activePuzzleId,
-			"presence",
-			"current",
-		);
+		const db = firestore;
+		const puzzleId = activePuzzleId;
+		const profile = currentProfile;
+		const uid = user.uid;
+		const presenceRef = doc(db, "puzzles", puzzleId, "presence", "current");
 
 		void setDoc(
 			presenceRef,
 			{
 				users: {
-					[user.uid]: {
-						username: currentProfile.username,
-						initial: currentProfile.initial,
-						color: currentProfile.color,
+					[uid]: {
+						username: profile.username,
+						initial: profile.initial,
+						color: profile.color,
 						selectedCellIndex,
 						selectedDirection,
 						lastSeenAt: serverTimestamp(),
@@ -569,12 +690,13 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const auth = firebaseAuth;
 		setIsBusy(true);
 		setError(null);
 
 		try {
 			await signInWithEmailAndPassword(
-				firebaseAuth,
+				auth,
 				credentials.email,
 				credentials.password,
 			);
@@ -594,11 +716,16 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const auth = firebaseAuth;
+		const firebaseFunctions = functions;
 		setIsBusy(true);
 		setError(null);
 
 		try {
-			const createAllowedAccount = httpsCallable(functions, "createAllowedAccount");
+			const createAllowedAccount = httpsCallable(
+				firebaseFunctions,
+				"createAllowedAccount",
+			);
 			await createAllowedAccount({
 				email: credentials.email,
 				password: credentials.password,
@@ -606,14 +733,17 @@ export function useCollaborativePuzzle() {
 				color: credentials.color,
 			});
 			await signInWithEmailAndPassword(
-				firebaseAuth,
+				auth,
 				credentials.email,
 				credentials.password,
 			);
 		} catch (caughtError) {
 			console.error("Create account failed", caughtError);
 			setError(
-				getReadableErrorMessage(caughtError, "Unable to create account."),
+				getReadableErrorMessage(
+					caughtError,
+					"Unable to create account.",
+				),
 			);
 		} finally {
 			setIsBusy(false);
@@ -626,15 +756,27 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
+		const db = firestore;
+		const firebaseFunctions = functions;
+		if (isFutureDateKey(date)) {
+			setError(
+				"The NYT does not publish future puzzles. Pick today or an earlier date.",
+			);
+			return;
+		}
+
 		setIsBusy(true);
 		setError(null);
 
 		try {
-			const puzzleRef = doc(firestore, "puzzles", date);
+			const puzzleRef = doc(db, "puzzles", date);
 			const puzzleSnapshot = await getDoc(puzzleRef);
 
 			if (!puzzleSnapshot.exists()) {
-				const ensurePuzzle = httpsCallable(functions, "ensurePuzzle");
+				const ensurePuzzle = httpsCallable(
+					firebaseFunctions,
+					"ensurePuzzle",
+				);
 				await ensurePuzzle({ date });
 			}
 
@@ -657,9 +799,12 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		const stateRef = doc(firestore, "puzzles", activePuzzleId, "state", "current");
-		const metadataRef = doc(firestore, "puzzles", activePuzzleId);
-		const batch = writeBatch(firestore);
+		const db = firestore;
+		const puzzleId = activePuzzleId;
+		const uid = user.uid;
+		const stateRef = doc(db, "puzzles", puzzleId, "state", "current");
+		const metadataRef = doc(db, "puzzles", puzzleId);
+		const batch = writeBatch(db);
 		const guessValue = value.toUpperCase();
 
 		setPuzzleState((current) => ({
@@ -668,7 +813,7 @@ export function useCollaborativePuzzle() {
 				...current.guesses,
 				[String(cellIndex)]: {
 					value: guessValue,
-					guesserId: user.uid,
+					guesserId: uid,
 					updatedAt: new Date(),
 					origin: "manual",
 				},
@@ -686,7 +831,7 @@ export function useCollaborativePuzzle() {
 				guesses: {
 					[cellIndex]: {
 						value: guessValue,
-						guesserId: user.uid,
+						guesserId: uid,
 						updatedAt: serverTimestamp(),
 						origin: "manual",
 					},
@@ -695,7 +840,7 @@ export function useCollaborativePuzzle() {
 					[cellIndex]: deleteField(),
 				},
 				updatedAt: serverTimestamp(),
-				lastEditedBy: user.uid,
+				lastEditedBy: uid,
 				revision: increment(1),
 			},
 			{ merge: true },
@@ -704,7 +849,7 @@ export function useCollaborativePuzzle() {
 			metadataRef,
 			{
 				lastWorkedAt: serverTimestamp(),
-				lastEditedBy: user.uid,
+				lastEditedBy: uid,
 			},
 			{ merge: true },
 		);
@@ -747,12 +892,15 @@ export function useCollaborativePuzzle() {
 
 		try {
 			if (action === "checkSelection") {
-				console.log("[crossword check] requesting backend verification", {
-					puzzleId: activePuzzleId,
-					scope,
-					selectedCellIndex,
-					selectedDirection,
-				});
+				console.log(
+					"[crossword check] requesting backend verification",
+					{
+						puzzleId: activePuzzleId,
+						scope,
+						selectedCellIndex,
+						selectedDirection,
+					},
+				);
 			}
 
 			const callable = httpsCallable(functions, action);
@@ -790,13 +938,26 @@ export function useCollaborativePuzzle() {
 			return;
 		}
 
-		await updateDoc(doc(firestore, "users", user.uid), {
+		const db = firestore;
+		const uid = user.uid;
+
+		await updateDoc(doc(db, "users", uid), {
 			username: input.username.trim(),
 			initial: input.username.trim().slice(0, 1).toUpperCase(),
 			color: input.color.trim(),
 			updatedAt: serverTimestamp(),
 			lastSeenAt: serverTimestamp(),
 		});
+	}
+
+	async function handleSignOut() {
+		if (!firebaseAuth) {
+			setError(getFirebaseConfigError());
+			return;
+		}
+
+		const auth = firebaseAuth;
+		await firebaseSignOut(auth);
 	}
 
 	const activeUsers = useMemo(() => {
@@ -811,13 +972,56 @@ export function useCollaborativePuzzle() {
 					return uid === user?.uid;
 				}
 
-				return now - entry.lastSeenAt.getTime() <= ACTIVE_USER_WINDOW_MS;
+				return (
+					now - entry.lastSeenAt.getTime() <= ACTIVE_USER_WINDOW_MS
+				);
 			})
+			.sort(([firstUid], [secondUid]) =>
+				firstUid.localeCompare(secondUid),
+			)
 			.map(([uid, entry]) => ({
 				uid,
 				...entry,
 			}));
 	}, [presence.users, user?.uid]);
+
+	const activePuzzleProgress = useMemo(() => {
+		if (!renderModel) {
+			return null;
+		}
+
+		const playableCells = renderModel.cells.filter((cell) => !cell.isBlock);
+		if (playableCells.length === 0) {
+			return 0;
+		}
+
+		const filledCellCount = playableCells.filter((cell) => {
+			const value = puzzleState.guesses[String(cell.index)]?.value ?? "";
+			return value.trim().length > 0;
+		}).length;
+
+		return filledCellCount / playableCells.length;
+	}, [puzzleState.guesses, renderModel]);
+
+	const visibleMonthStatuses = useMemo(() => {
+		if (!activePuzzleId || activePuzzleProgress === null) {
+			return monthStatuses;
+		}
+
+		return {
+			...monthStatuses,
+			[activePuzzleId]: {
+				completionState:
+					puzzleMeta?.completionState ??
+					monthStatuses[activePuzzleId]?.completionState ??
+					"in_progress",
+				completionProgress: activePuzzleProgress,
+				lastWorkedAt:
+					puzzleMeta?.lastWorkedAt ??
+					monthStatuses[activePuzzleId]?.lastWorkedAt,
+			},
+		};
+	}, [activePuzzleId, activePuzzleProgress, monthStatuses, puzzleMeta]);
 
 	return {
 		authReady,
@@ -833,7 +1037,7 @@ export function useCollaborativePuzzle() {
 		selectedCellIndex,
 		selectedDirection,
 		monthViewDate,
-		monthStatuses,
+		monthStatuses: visibleMonthStatuses,
 		error,
 		isBusy,
 		isSavingGuesses: pendingGuessWriteCount > 0,
@@ -844,7 +1048,7 @@ export function useCollaborativePuzzle() {
 		setMonthViewDate,
 		signIn,
 		createAccount,
-		signOut: firebaseAuth ? () => signOut(firebaseAuth) : async () => {},
+		signOut: handleSignOut,
 		openPuzzle,
 		updateGuess,
 		deleteGuess,

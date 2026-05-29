@@ -25,6 +25,9 @@ export type PuzzleMetadata = {
 	lastWorkedAt?: Date | null;
 	lastEditedBy?: string | null;
 	completionState: PuzzleCompletionState;
+	completionProgress: number;
+	filledCellCount?: number;
+	totalCellCount?: number;
 	completedAt?: Date | null;
 };
 
@@ -105,6 +108,8 @@ export type CalendarStatusMap = Record<
 	string,
 	{
 		completionState: PuzzleCompletionState;
+		completionProgress: number;
+		hasStoredCompletionProgress?: boolean;
 		lastWorkedAt?: Date | null;
 	}
 >;

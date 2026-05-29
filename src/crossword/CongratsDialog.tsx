@@ -65,7 +65,7 @@ export default function CongratsDialog({
 				</div>
 				<p className="crossword-dialog__body">
 					{isComplete
-						? "The puzzle is fully correct. The calendar star is filled, and your group can admire the finish."
+						? "The puzzle is fully correct. The calendar circle is filled, and your group can admire the finish."
 						: isUnverified
 							? "The grid is full, but the app could not retrieve reliable check results yet, so it cannot confirm whether the puzzle is correct."
 							: `The grid is full, but ${incorrectCount} ${
