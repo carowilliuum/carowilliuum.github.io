@@ -205,8 +205,6 @@ export default function CrosswordPage() {
 			`(max-width: ${MOBILE_BREAKPOINT_PX}px)`,
 		).matches;
 	});
-	const [mobileClueDirection, setMobileClueDirection] =
-		useState<Direction>("Across");
 	const boardPanelRef = useRef<HTMLDivElement | null>(null);
 	const jumpInputRef = useRef<HTMLInputElement | null>(null);
 	const autoCheckedFillSignatureRef = useRef<string | null>(null);
@@ -297,14 +295,6 @@ export default function CrosswordPage() {
 		jumpInputRef.current?.focus();
 		jumpInputRef.current?.select();
 	}, [showJumpPalette]);
-
-	useEffect(() => {
-		if (!isSmallScreen) {
-			return;
-		}
-
-		setMobileClueDirection(selectedDirection);
-	}, [isSmallScreen, selectedDirection]);
 
 	useEffect(() => {
 		if (!isSmallScreen || selectedCellIndex === null) {
@@ -1238,6 +1228,7 @@ export default function CrosswordPage() {
 						<CrosswordGrid
 							puzzle={renderModel}
 							isSmallScreen={isSmallScreen}
+							showClueBar={!isSmallScreen}
 							selectedCellIndex={selectedCellIndex}
 							primaryHighlightedCellIndexes={
 								primaryHighlightedCellIndexes
@@ -1280,48 +1271,12 @@ export default function CrosswordPage() {
 						</div>
 					</section>
 				)}
-				<section
-					className={`crossword-clues ${
-						isSmallScreen ? "crossword-clues--mobile" : ""
-					}`}
-					aria-label="Clue lists"
-					style={cluesStyle}
-				>
-					{isSmallScreen ? (
-						<div
-							className="crossword-clues__mobile-tabs"
-							role="tablist"
-							aria-label="Clue directions"
-						>
-							<button
-								type="button"
-								role="tab"
-								aria-selected={mobileClueDirection === "Across"}
-								className={`crossword-clues__mobile-tab ${
-									mobileClueDirection === "Across"
-										? "crossword-clues__mobile-tab--active"
-										: ""
-								}`}
-								onClick={() => setMobileClueDirection("Across")}
-							>
-								Across
-							</button>
-							<button
-								type="button"
-								role="tab"
-								aria-selected={mobileClueDirection === "Down"}
-								className={`crossword-clues__mobile-tab ${
-									mobileClueDirection === "Down"
-										? "crossword-clues__mobile-tab--active"
-										: ""
-								}`}
-								onClick={() => setMobileClueDirection("Down")}
-							>
-								Down
-							</button>
-						</div>
-					) : null}
-					{(!isSmallScreen || mobileClueDirection === "Across") && (
+				{!isSmallScreen ? (
+					<section
+						className="crossword-clues"
+						aria-label="Clue lists"
+						style={cluesStyle}
+					>
 						<ClueList
 							title="Across"
 							clues={acrossClues}
@@ -1329,8 +1284,6 @@ export default function CrosswordPage() {
 							selectedClueId={activeClueId}
 							onSelectClue={handleSelectClue}
 						/>
-					)}
-					{(!isSmallScreen || mobileClueDirection === "Down") && (
 						<ClueList
 							title="Down"
 							clues={downClues}
@@ -1338,9 +1291,25 @@ export default function CrosswordPage() {
 							selectedClueId={activeClueId}
 							onSelectClue={handleSelectClue}
 						/>
-					)}
-				</section>
+					</section>
+				) : null}
 			</main>
+			{isSmallScreen && renderModel ? (
+				<div className="crossword-mobile-clue-footer" aria-live="polite">
+					<div
+						className={`crossword-clue-bar crossword-clue-bar--mobile-footer ${
+							activeClueLabel
+								? ""
+								: "crossword-clue-bar--label-hidden"
+						}`}
+					>
+						{activeClueLabel ? (
+							<div className="crossword-clue-bar__number">{activeClueLabel}</div>
+						) : null}
+						<div className="crossword-clue-bar__text">{activeClueText}</div>
+					</div>
+				</div>
+			) : null}
 
 			<ProfileDrawer
 				isOpen={showProfileDrawer}
