@@ -10,6 +10,7 @@ type RemoteSelection = {
 	uid: string;
 	color: string;
 	selectedCellIndex: number | null;
+	wordCellIndexes: number[];
 };
 
 type CrosswordGridProps = {
@@ -65,6 +66,18 @@ export default function CrosswordGrid({
 }: CrosswordGridProps) {
 	const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
 	const mobileInputRef = useRef<HTMLInputElement | null>(null);
+
+	const toAlphaColor = (hexColor: string, alpha: number) => {
+		const normalized = hexColor.trim().replace(/^#/, "");
+		if (!/^[0-9a-f]{6}$/i.test(normalized)) {
+			return `rgba(78, 149, 205, ${alpha})`;
+		}
+
+		const red = Number.parseInt(normalized.slice(0, 2), 16);
+		const green = Number.parseInt(normalized.slice(2, 4), 16);
+		const blue = Number.parseInt(normalized.slice(4, 6), 16);
+		return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+	};
 
 	const focusMobileInput = () => {
 		const input = mobileInputRef.current;
@@ -231,12 +244,17 @@ export default function CrosswordGrid({
 					const guessOwner = guessEntry?.guesserId
 						? guessOwners[guessEntry.guesserId]
 						: undefined;
-					const remoteSelectionsForCell = remoteSelections.filter(
-						(entry) => entry.selectedCellIndex === cellIndex,
-					);
-					const remoteSelectionOutline =
-						remoteSelectionsForCell.length > 0
-							? {
+						const remoteSelectionsForCell = remoteSelections.filter(
+							(entry) => entry.selectedCellIndex === cellIndex,
+						);
+						const remoteWordSelectionsForCell = remoteSelections.filter(
+							(entry) =>
+								entry.wordCellIndexes.includes(cellIndex) &&
+								entry.selectedCellIndex !== cellIndex,
+						);
+						const remoteSelectionOutline =
+							remoteSelectionsForCell.length > 0
+								? {
 									boxShadow: remoteSelectionsForCell
 										.map(
 											(entry, index) =>
@@ -245,9 +263,22 @@ export default function CrosswordGrid({
 										.join(", "),
 							  }
 							: undefined;
-					const hintIntensity =
-						proximityHintIntensityByCellIndex.get(cellIndex) ?? 0;
-					const className = [
+						const hintIntensity =
+							proximityHintIntensityByCellIndex.get(cellIndex) ?? 0;
+						const backgroundImageLayers = [
+							...remoteWordSelectionsForCell.map((entry) =>
+								`linear-gradient(${toAlphaColor(entry.color, 0.16)}, ${toAlphaColor(
+									entry.color,
+									0.16,
+								)})`,
+							),
+							hintIntensity > 0
+								? `linear-gradient(rgba(210, 50, 50, ${hintIntensity.toFixed(
+										3,
+									)}), rgba(210, 50, 50, ${hintIntensity.toFixed(3)}))`
+								: null,
+						].filter((layer): layer is string => Boolean(layer));
+						const className = [
 						"crossword-grid__cell",
 						isBlock ? "crossword-grid__cell--block" : "",
 						secondaryHighlightedCellIndexes.has(cellIndex)
@@ -309,12 +340,13 @@ export default function CrosswordGrid({
 								event.preventDefault();
 								focusMobileInput();
 							}}
-							style={{
-								...remoteSelectionOutline,
-								"--crossword-cell-hint-overlay": `rgba(210, 50, 50, ${hintIntensity.toFixed(
-									3,
-								)})`,
-							} as CSSProperties}
+								style={{
+									...remoteSelectionOutline,
+									backgroundImage:
+										backgroundImageLayers.length > 0
+											? backgroundImageLayers.join(", ")
+											: undefined,
+								} as CSSProperties}
 							onKeyDown={(event) => {
 								const currentValue = guessEntry?.value ?? "";
 								const isRebusCell = (cell.type ?? 1) !== 1;

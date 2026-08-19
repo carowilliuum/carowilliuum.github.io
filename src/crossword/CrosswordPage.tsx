@@ -457,12 +457,27 @@ export default function CrosswordPage() {
 		() =>
 			activeUsers
 				.filter((activeUser) => activeUser.uid !== user?.uid)
-				.map((activeUser) => ({
-					uid: activeUser.uid,
-					color: activeUser.color,
-					selectedCellIndex: activeUser.selectedCellIndex ?? null,
-				})),
-		[activeUsers, user],
+				.map((activeUser) => {
+					const selectedCellIndex = activeUser.selectedCellIndex ?? null;
+					const clueId =
+						renderModel && selectedCellIndex !== null
+							? getCellClueIdForDirection(
+									renderModel,
+									selectedCellIndex,
+									activeUser.selectedDirection,
+								)
+							: null;
+					return {
+						uid: activeUser.uid,
+						color: activeUser.color,
+						selectedCellIndex,
+						wordCellIndexes:
+							renderModel && clueId !== null
+								? renderModel.clues[clueId]?.cellIndexes ?? []
+								: [],
+					};
+				}),
+		[activeUsers, renderModel, user],
 	);
 
 	const guessOwners = useMemo(
@@ -581,16 +596,31 @@ export default function CrosswordPage() {
 		[playableCellIndexes, puzzleState.guesses],
 	);
 
-	const clearCheckFeedbackForCell = (cellIndex: number) => {
+	const clearCheckFeedbackForCells = (cellIndexes: number[]) => {
+		if (cellIndexes.length === 0) {
+			return;
+		}
+
+		const affectedCellIndexes = new Set(cellIndexes);
 		setCheckedCorrectCellIndexes((current) =>
-			current.filter((currentCellIndex) => currentCellIndex !== cellIndex),
+			current.filter((currentCellIndex) => !affectedCellIndexes.has(currentCellIndex)),
 		);
 		setCheckedIncorrectCellIndexes((current) =>
-			current.filter((currentCellIndex) => currentCellIndex !== cellIndex),
+			current.filter((currentCellIndex) => !affectedCellIndexes.has(currentCellIndex)),
 		);
-		setVerifiedIncorrectCellIndexes((current) =>
-			current.filter((currentCellIndex) => currentCellIndex !== cellIndex),
+		const nextVerifiedIncorrectCellIndexes = verifiedIncorrectCellIndexes.filter(
+			(currentCellIndex) => !affectedCellIndexes.has(currentCellIndex),
 		);
+		setVerifiedIncorrectCellIndexes(nextVerifiedIncorrectCellIndexes);
+		if (nextVerifiedIncorrectCellIndexes.length === 0) {
+			setShowIncorrectDialog(false);
+		}
+		setActiveIncorrectHintCenterCellIndexes(clearNumberListIfNeeded);
+		setIncorrectHintFadeProgress(1);
+	};
+
+	const clearCheckFeedbackForCell = (cellIndex: number) => {
+		clearCheckFeedbackForCells([cellIndex]);
 	};
 
 	const applyCheckFeedback = (
@@ -921,6 +951,26 @@ export default function CrosswordPage() {
 			result,
 		});
 		applyCheckFeedback(affectedCellIndexes, result);
+	};
+
+	const handleRevealSelection = async (scope: CheckRevealScope) => {
+		if (!renderModel) {
+			return;
+		}
+
+		const affectedCellIndexes = getAffectedCellIndexes(
+			renderModel,
+			scope,
+			selectedCellIndex,
+			selectedDirection,
+		);
+		clearCheckFeedbackForCells(affectedCellIndexes);
+		setShowUnverifiedDialog(false);
+
+		const result = await revealSelection(scope);
+		if (result === null) {
+			setShowUnverifiedDialog(true);
+		}
 	};
 
 	const handleSelectCell = (cellIndex: number) => {
@@ -1269,7 +1319,7 @@ export default function CrosswordPage() {
 												return;
 											}
 
-											void revealSelection(item.scope);
+											void handleRevealSelection(item.scope);
 										}}
 									>
 										{item.label}
