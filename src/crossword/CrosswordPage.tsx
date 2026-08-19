@@ -202,6 +202,9 @@ export default function CrosswordPage() {
 		monthStatuses,
 		error,
 		isBusy,
+		isVerifyingPasswordResetCode,
+		passwordResetCode,
+		passwordResetEmail,
 		isSavingGuesses,
 		showCongrats,
 		setShowCongrats,
@@ -210,6 +213,9 @@ export default function CrosswordPage() {
 		setMonthViewDate,
 		signIn,
 		createAccount,
+		requestPasswordReset,
+		resetPassword,
+		clearPendingPasswordReset,
 		signOut,
 		openPuzzle,
 		updateGuess,
@@ -1172,13 +1178,19 @@ export default function CrosswordPage() {
 		return <div className="crossword-page crossword-page--loading">Loading…</div>;
 	}
 
-	if (!user) {
+	if (!user || isVerifyingPasswordResetCode || passwordResetCode) {
 		return (
 			<AuthScreen
 				isBusy={isBusy}
+				isVerifyingPasswordResetCode={isVerifyingPasswordResetCode}
 				error={error}
 				onLogin={signIn}
 				onCreateAccount={createAccount}
+				onRequestPasswordReset={requestPasswordReset}
+				onResetPassword={resetPassword}
+				onClearPendingPasswordReset={clearPendingPasswordReset}
+				passwordResetCode={passwordResetCode}
+				passwordResetEmail={passwordResetEmail}
 			/>
 		);
 	}

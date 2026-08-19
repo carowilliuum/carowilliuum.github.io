@@ -17,9 +17,12 @@ import {
 	type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import {
+	confirmPasswordReset,
 	onAuthStateChanged,
+	sendPasswordResetEmail,
 	signInWithEmailAndPassword,
 	signOut as firebaseSignOut,
+	verifyPasswordResetCode,
 	type User,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -55,10 +58,38 @@ type Credentials = {
 	color?: string;
 };
 
+type PasswordResetInput = {
+	oobCode: string;
+	password: string;
+};
+
 function getReadableErrorMessage(
 	caughtError: unknown,
 	fallbackMessage: string,
 ) {
+	if (
+		caughtError &&
+		typeof caughtError === "object" &&
+		"code" in caughtError &&
+		typeof (caughtError as { code?: unknown }).code === "string"
+	) {
+		switch ((caughtError as { code: string }).code) {
+			case "auth/invalid-credential":
+				return "Incorrect email or password.";
+			case "auth/invalid-email":
+				return "Enter a valid email address.";
+			case "auth/missing-password":
+				return "Enter your password.";
+			case "auth/weak-password":
+				return "Password must be at least 6 characters.";
+			case "auth/invalid-action-code":
+			case "auth/expired-action-code":
+				return "This password reset link is invalid or has expired.";
+			default:
+				break;
+		}
+	}
+
 	if (
 		caughtError &&
 		typeof caughtError === "object" &&
@@ -72,6 +103,36 @@ function getReadableErrorMessage(
 	}
 
 	return fallbackMessage;
+}
+
+function buildCrosswordAuthUrl() {
+	const nextUrl = new URL(window.location.origin);
+	nextUrl.pathname = "/";
+	nextUrl.searchParams.set("route", "/crossword");
+
+	return nextUrl.toString();
+}
+
+function clearPasswordResetParams() {
+	const nextUrl = new URL(window.location.href);
+	nextUrl.hash = "";
+
+	for (const key of [
+		"apiKey",
+		"continueUrl",
+		"lang",
+		"mode",
+		"oobCode",
+	]) {
+		nextUrl.searchParams.delete(key);
+	}
+
+	const nextSearch = nextUrl.searchParams.toString();
+	window.history.replaceState(
+		{},
+		document.title,
+		`${nextUrl.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
+	);
 }
 
 function snapshotDate(value: unknown) {
@@ -335,6 +396,12 @@ export function useCollaborativePuzzle() {
 	const [isBusy, setIsBusy] = useState(false);
 	const [pendingGuessWriteCount, setPendingGuessWriteCount] = useState(0);
 	const [showCongrats, setShowCongrats] = useState(false);
+	const [passwordResetCode, setPasswordResetCode] = useState<string | null>(null);
+	const [passwordResetEmail, setPasswordResetEmail] = useState<string | null>(
+		null,
+	);
+	const [isVerifyingPasswordResetCode, setIsVerifyingPasswordResetCode] =
+		useState(false);
 	const previousCompletionState = useRef<string | null>(null);
 	const progressBackfillIds = useRef<Set<string>>(new Set());
 
@@ -355,6 +422,65 @@ export function useCollaborativePuzzle() {
 			setUser(nextUser);
 			setAuthReady(true);
 		});
+	}, []);
+
+	useEffect(() => {
+		if (!firebaseAuth) {
+			setPasswordResetCode(null);
+			setPasswordResetEmail(null);
+			setIsVerifyingPasswordResetCode(false);
+			return;
+		}
+
+		const params = new URLSearchParams(window.location.search);
+		const mode = params.get("mode");
+		const oobCode = params.get("oobCode");
+
+		if (mode !== "resetPassword" || !oobCode) {
+			setPasswordResetCode(null);
+			setPasswordResetEmail(null);
+			setIsVerifyingPasswordResetCode(false);
+			return;
+		}
+
+		let isCancelled = false;
+		setIsVerifyingPasswordResetCode(true);
+		setError(null);
+
+		void verifyPasswordResetCode(firebaseAuth, oobCode)
+			.then((email) => {
+				if (isCancelled) {
+					return;
+				}
+
+				setPasswordResetCode(oobCode);
+				setPasswordResetEmail(email);
+			})
+			.catch((caughtError) => {
+				console.error("Verify password reset code failed", caughtError);
+				if (isCancelled) {
+					return;
+				}
+
+				setPasswordResetCode(null);
+				setPasswordResetEmail(null);
+				setError(
+					getReadableErrorMessage(
+						caughtError,
+						"This password reset link is invalid or has expired.",
+					),
+				);
+				clearPasswordResetParams();
+			})
+			.finally(() => {
+				if (!isCancelled) {
+					setIsVerifyingPasswordResetCode(false);
+				}
+			});
+
+		return () => {
+			isCancelled = true;
+		};
 	}, []);
 
 	useEffect(() => {
@@ -750,6 +876,69 @@ export function useCollaborativePuzzle() {
 		}
 	}
 
+	async function requestPasswordReset(email: string) {
+		if (!firebaseAuth) {
+			setError(getFirebaseConfigError());
+			return false;
+		}
+
+		setIsBusy(true);
+		setError(null);
+
+		try {
+			await sendPasswordResetEmail(firebaseAuth, email, {
+				url: buildCrosswordAuthUrl(),
+			});
+			return true;
+		} catch (caughtError) {
+			console.error("Password reset request failed", caughtError);
+			setError(
+				getReadableErrorMessage(
+					caughtError,
+					"Unable to send a password reset email.",
+				),
+			);
+			return false;
+		} finally {
+			setIsBusy(false);
+		}
+	}
+
+	async function resetPassword(input: PasswordResetInput) {
+		if (!firebaseAuth) {
+			setError(getFirebaseConfigError());
+			return false;
+		}
+
+		setIsBusy(true);
+		setError(null);
+
+		try {
+			await confirmPasswordReset(firebaseAuth, input.oobCode, input.password);
+			setPasswordResetCode(null);
+			setPasswordResetEmail(null);
+			clearPasswordResetParams();
+			return true;
+		} catch (caughtError) {
+			console.error("Password reset failed", caughtError);
+			setError(
+				getReadableErrorMessage(
+					caughtError,
+					"Unable to reset your password.",
+				),
+			);
+			return false;
+		} finally {
+			setIsBusy(false);
+		}
+	}
+
+	function clearPendingPasswordReset() {
+		setPasswordResetCode(null);
+		setPasswordResetEmail(null);
+		clearPasswordResetParams();
+	}
+
 	async function openPuzzle(date: string) {
 		if (!firestore || !functions || !user) {
 			setError(getFirebaseConfigError());
@@ -1040,7 +1229,10 @@ export function useCollaborativePuzzle() {
 		monthStatuses: visibleMonthStatuses,
 		error,
 		isBusy,
+		isVerifyingPasswordResetCode,
 		isSavingGuesses: pendingGuessWriteCount > 0,
+		passwordResetCode,
+		passwordResetEmail,
 		showCongrats,
 		setShowCongrats,
 		setSelectedCellIndex,
@@ -1048,6 +1240,9 @@ export function useCollaborativePuzzle() {
 		setMonthViewDate,
 		signIn,
 		createAccount,
+		requestPasswordReset,
+		resetPassword,
+		clearPendingPasswordReset,
 		signOut: handleSignOut,
 		openPuzzle,
 		updateGuess,
